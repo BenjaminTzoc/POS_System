@@ -8,6 +8,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { LogisticsModule } from './logistics/logistics.module';
 import { PurchasesModule } from './purchases/purchases.module';
+import { SalesModule } from './sales/sales.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { PurchasesModule } from './purchases/purchases.module';
     AuthModule,
     LogisticsModule,
     PurchasesModule,
+    SalesModule,
   ],
   controllers: [],
   providers: [

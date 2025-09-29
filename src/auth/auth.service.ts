@@ -6,6 +6,7 @@ import { CreatePermissionDto, CreateRoleDto, CreateUserDto, PermissionResponseDt
 import { plainToInstance } from 'class-transformer';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly userRepository: Repository<User>,
 
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   async generateJwt(user: User): Promise<{ accessToken: string }> {
@@ -478,6 +480,7 @@ export class AuthService {
 
     // Actualizar último login
     await this.updateLastLogin(user.id);
+
     const { accessToken } = await this.generateJwt(user);
 
     return {

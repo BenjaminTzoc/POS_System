@@ -10,20 +10,21 @@ export class UsersController {
   ) {}
 
   @Post()
-  @Permissions('users.create')
+  // @Permissions('users.create')
   @HttpCode(HttpStatus.CREATED)
   createUser(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
     return this.authService.createUser(dto);
   }
 
   @Get()
-  @Permissions('users.read')
+  @Public()
+  // @Permissions('users.read')
   findAllUsers(): Promise<UserResponseDto[]> {
     return this.authService.findAllUsers();
   }
 
   @Get(':id')
-  @Permissions('users.read')
+  // @Permissions('users.read')
   findOneUser(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
     return this.authService.findOneUser(id);
   }
@@ -34,7 +35,7 @@ export class UsersController {
   }
 
   @Put(':id')
-  @Permissions('users.update')
+  // @Permissions('users.update')
   updateUser(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserDto,
@@ -43,7 +44,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Permissions('users.delete')
+  // @Permissions('users.delete')
   @HttpCode(HttpStatus.OK)
   removeUser(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.authService.removeUser(id);
