@@ -25,6 +25,9 @@ export class Product extends BaseEntity {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   price: number;
 
+  @Column({ type: 'text', nullable: true })
+  imageUrl?: string;
+
   @ManyToOne(() => Category, { eager: true, nullable: true })
   @JoinColumn({ name: 'category_id' })
   category?: Category;

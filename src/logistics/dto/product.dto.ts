@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min, isString, IsEnum, IsBoolean } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { CategoryResponseDto } from './category.dto';
@@ -74,6 +74,10 @@ export class UpdateProductDto {
   price?: number;
 
   @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @IsOptional()
   @IsUUID()
   categoryId?: string;
 
@@ -102,6 +106,9 @@ export class ProductResponseDto extends BaseEntity {
   price: number;
 
   @Expose()
+  imageUrl: string | null;
+
+  @Expose()
   @Type(() => CategoryResponseDto)
   category: CategoryResponseDto | null;
 
@@ -117,4 +124,10 @@ export class ProductResponseDto extends BaseEntity {
 
   @Exclude()
   declare deletedAt: Date | null;
+}
+
+export class UpdateProductImageDto {
+  @IsNotEmpty()
+  @IsString()
+  imageUrl: string;
 }

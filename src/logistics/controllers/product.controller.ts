@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { ProductService } from '../services';
 import { CreateProductDto, ProductResponseDto, UpdateProductDto } from '../dto';
 import { Public } from 'src/auth/decorators';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 
 @Controller('products')
 export class ProductController {
@@ -12,8 +14,12 @@ export class ProductController {
   @Post()
   @Public()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateProductDto): Promise<ProductResponseDto> {
-    return this.productService.create(dto);
+  @UseInterceptors(FileInterceptor('image'))
+  create(
+    @Body() dto: CreateProductDto, 
+    @UploadedFile() image?: any,
+  ): Promise<ProductResponseDto> {
+    return this.productService.create(dto, image);
   }
 
   @Get()
@@ -48,11 +54,52 @@ export class ProductController {
 
   @Put(':id')
   @Public()
+  @UseInterceptors(FileInterceptor('image', {
+    storage: memoryStorage(),
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB
+    },
+    fileFilter: (req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+      } else {
+        cb(new BadRequestException('Solo se permiten archivos de imagen'), false);
+      }
+    },
+  }))
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateProductDto,
+    @UploadedFile() image?: any,
   ): Promise<ProductResponseDto> {
-    return this.productService.update(id, dto);
+    return this.productService.update(id, dto, image);
+  }
+
+  // NUEVO ENDPOINT para actualizar solo la imagen
+  @Put(':id/image')
+  @Public()
+  @UseInterceptors(FileInterceptor('image', {
+    storage: memoryStorage(),
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB
+    },
+    fileFilter: (req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+      } else {
+        cb(new BadRequestException('Solo se permiten archivos de imagen'), false);
+      }
+    },
+  }))
+  @HttpCode(HttpStatus.OK)
+  updateImage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() image: any,
+  ): Promise<ProductResponseDto> {
+    if (!image) {
+      throw new BadRequestException('Debe proporcionar una imagen');
+    }
+    return this.productService.updateImage(id, image);
   }
 
   @Delete(':id')

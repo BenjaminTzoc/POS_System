@@ -1,22 +1,28 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Product } from '../entities';
+import { Branch, Inventory, Product } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { CategoryService } from './category.service';
 import { UnitService } from './unit.service';
 import { CreateProductDto, ProductResponseDto, UpdateProductDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
+import { FilesService } from './files.service';
 
 @Injectable()
 export class ProductService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(Inventory)
+    private readonly inventoryRepository: Repository<Inventory>,
+    @InjectRepository(Branch)
+    private readonly branchRepository: Repository<Branch>,
     private readonly categoryService: CategoryService,
     private readonly unitService: UnitService,
+    private readonly fileService: FilesService,
   ) {}
 
-  async create(dto: CreateProductDto): Promise<ProductResponseDto> {
+  async create(dto: CreateProductDto, imageFile?: any): Promise<ProductResponseDto> {
     // Verificar si el SKU ya existe
     const existingSku = await this.productRepository.findOne({
       where: { sku: dto.sku },
@@ -41,6 +47,11 @@ export class ProductService {
 
     let category: any = null;
     let unit: any = null;
+    let imageUrl: string | undefined;
+
+    if (imageFile) {
+      imageUrl = await this.fileService.saveProductImage(imageFile);
+    }
 
     // Validar y obtener la categoría si se proporciona
     if (dto.categoryId) {
@@ -72,6 +83,7 @@ export class ProductService {
       barcode: dto.barcode,
       cost: dto.cost,
       price: dto.price,
+      imageUrl: imageUrl,
       category: category,
       unit: unit,
     });
@@ -128,7 +140,7 @@ export class ProductService {
     return plainToInstance(ProductResponseDto, product);
   }
 
-  async update(id: string, dto: UpdateProductDto): Promise<ProductResponseDto> {
+  async update(id: string, dto: UpdateProductDto, imageFile?: any): Promise<ProductResponseDto> {
     const product = await this.productRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['category', 'unit', 'category.defaultUnit'],
@@ -169,6 +181,18 @@ export class ProductService {
       throw new BadRequestException('El precio debe ser mayor o igual al costo');
     }
 
+    // MANEJO DE IMAGEN - NUEVO
+    let imageUrl = product.imageUrl;
+    if (imageFile) {
+      // Eliminar imagen anterior si existe
+      if (product.imageUrl) {
+        await this.fileService.deleteProductImage(product.imageUrl);
+      }
+      
+      // Guardar nueva imagen
+      imageUrl = await this.fileService.saveProductImage(imageFile);
+    }
+
     // Manejar categoría
     let category: any = product.category;
     if (dto.categoryId !== undefined) {
@@ -204,6 +228,7 @@ export class ProductService {
       barcode: dto.barcode ?? product.barcode,
       cost: dto.cost ?? product.cost,
       price: dto.price ?? product.price,
+      imageUrl: imageUrl,
       category: category,
       unit: unit,
     });
@@ -268,5 +293,31 @@ export class ProductService {
       .getMany();
 
     return plainToInstance(ProductResponseDto, products);
+  }
+
+  // NUEVO MÉTODO para actualizar solo la imagen
+  async updateImage(id: string, imageFile: any): Promise<ProductResponseDto> {
+    const product = await this.productRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+      relations: ['category', 'unit', 'category.defaultUnit'],
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Producto con ID ${id} no encontrado`);
+    }
+
+    // Eliminar imagen anterior si existe
+    if (product.imageUrl) {
+      await this.fileService.deleteProductImage(product.imageUrl);
+    }
+
+    // Guardar nueva imagen
+    const imageUrl = await this.fileService.saveProductImage(imageFile);
+
+    // Actualizar solo la imagen
+    product.imageUrl = imageUrl;
+    const updatedProduct = await this.productRepository.save(product);
+    
+    return plainToInstance(ProductResponseDto, updatedProduct);
   }
 }
