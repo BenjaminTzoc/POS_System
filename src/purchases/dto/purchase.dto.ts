@@ -24,26 +24,6 @@ export class CreatePurchaseDto {
   supplierId: string;
 
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  subtotal?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  taxAmount?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  discountAmount?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  total?: number;
-
-  @IsOptional()
   @IsString()
   notes?: string;
 
@@ -55,10 +35,9 @@ export class CreatePurchaseDto {
 }
 
 export class UpdatePurchaseDto {
-  @IsOptional()
   @IsString()
   @MaxLength(50)
-  invoiceNumber?: string;
+  invoiceNumber: string;
 
   @IsOptional()
   @IsDateString()

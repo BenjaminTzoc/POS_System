@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { PaymentMethod, Purchase, PurchaseDetail, PurchasePayment, Supplier } from './entities';
 import { PaymentMethodController, PurchaseController, PurchasePaymentController, SupplierController } from './controllers';
 import { LogisticsModule } from 'src/logistics/logistics.module';
+import { PurchaseGateway } from './gateway/purchase.gateway';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { LogisticsModule } from 'src/logistics/logistics.module';
     LogisticsModule,
   ],
   controllers: [SupplierController, PaymentMethodController, PurchaseController, PurchasePaymentController],
-  providers: [SupplierService, PaymentMethodService, PurchaseService, PurchasePaymentService],
-  exports: [SupplierService, PaymentMethodService, PurchaseService, PurchasePaymentService],
+  providers: [SupplierService, PaymentMethodService, PurchaseService, PurchasePaymentService, PurchaseGateway],
+  exports: [SupplierService, PaymentMethodService, PurchaseService, PurchasePaymentService, PurchaseGateway],
 })
 export class PurchasesModule {}

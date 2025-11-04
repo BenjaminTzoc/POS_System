@@ -1,24 +1,25 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Purchase, PurchaseDetail, PurchaseStatus } from '../entities';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, IsNull, Like, Repository } from 'typeorm';
 import { SupplierService } from '.';
 import { InventoryMovementService, ProductService } from 'src/logistics/services';
 import { CreatePurchaseDto, PurchaseResponseDto, UpdatePurchaseDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { MovementStatus, MovementType } from 'src/logistics/entities/inventory-movement.entity';
+import { PurchaseGateway } from '../gateway/purchase.gateway';
 
 @Injectable()
 export class PurchaseService {
   constructor(
     @InjectRepository(Purchase)
     private readonly purchaseRepository: Repository<Purchase>,
-    @InjectRepository(PurchaseDetail)
-    private readonly purchaseDetailRepository: Repository<PurchaseDetail>,
+
     private readonly supplierService: SupplierService,
     private readonly productService: ProductService,
     private readonly inventoryMovementService: InventoryMovementService,
     private readonly dataSource: DataSource,
+    private readonly purchaseGateway: PurchaseGateway,
   ) {}
 
   async create(dto: CreatePurchaseDto): Promise<PurchaseResponseDto> {
@@ -50,31 +51,28 @@ export class PurchaseService {
     await queryRunner.startTransaction();
 
     try {
-      // Crear la compra
       const purchase = queryRunner.manager.create(Purchase, {
         invoiceNumber: dto.invoiceNumber,
         date: new Date(dto.date),
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : new Date(),
         supplier: { id: dto.supplierId },
-        subtotal: dto.subtotal || 0,
-        taxAmount: dto.taxAmount || 0,
-        discountAmount: dto.discountAmount || 0,
-        total: dto.total || 0,
+        subtotal: 0,
+        taxAmount: 0,
+        discountAmount: 0,
+        total: 0,
         paidAmount: 0,
-        pendingAmount: dto.total || 0,
+        pendingAmount: 0,
         notes: dto.notes,
         status: PurchaseStatus.PENDING,
       });
 
       const savedPurchase = await queryRunner.manager.save(purchase);
 
-      // Crear detalles de la compra y calcular totales
       let subtotal = 0;
       let taxAmount = 0;
       let discountAmount = 0;
 
       for (const detailDto of dto.details) {
-        // Validar que el producto existe
         let product;
         try {
           product = await this.productService.findOne(detailDto.productId);
@@ -84,9 +82,10 @@ export class PurchaseService {
 
         // Calcular montos del detalle
         const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
-        const lineDiscount = detailDto.discountAmount || (lineSubtotal * (detailDto.discount || 0) / 100);
-        const lineTax = detailDto.taxAmount || (lineSubtotal * (detailDto.taxPercentage || 0) / 100);
-        const lineTotal = lineSubtotal - lineDiscount + lineTax;
+        const lineDiscount = lineSubtotal * (detailDto.discount || 0) / 100;
+        const subtotalAfterDiscount = lineSubtotal - lineDiscount;
+        const lineTax = subtotalAfterDiscount * (detailDto.taxPercentage || 0) / 100;
+        const lineTotal = subtotalAfterDiscount + lineTax;
 
         const detail = queryRunner.manager.create(PurchaseDetail, {
           purchase: savedPurchase,
@@ -107,7 +106,6 @@ export class PurchaseService {
         taxAmount += lineTax;
       }
 
-      // Actualizar totales de la compra
       const total = subtotal - discountAmount + taxAmount;
       
       await queryRunner.manager.update(Purchase, savedPurchase.id, {
@@ -120,7 +118,14 @@ export class PurchaseService {
 
       await queryRunner.commitTransaction();
 
-      return this.findOne(savedPurchase.id);
+      const completePurchase = await this.findOne(savedPurchase.id);
+
+      this.purchaseGateway.notifyNewPurchase(completePurchase);
+
+      const nextNumber = await this.generateNextInvoiceNumber();
+      this.purchaseGateway.broadcastNextInvoiceNumber(nextNumber.nextNumber);
+
+      return completePurchase;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -352,5 +357,34 @@ export class PurchaseService {
     if (paidAmount < total) return PurchaseStatus.PARTIALLY_PAID;
     if (paidAmount >= total) return PurchaseStatus.PAID;
     return PurchaseStatus.PENDING;
+  }
+
+  async generateNextInvoiceNumber(): Promise<{ nextNumber: string }> {
+    const currentYear = new Date().getFullYear();
+
+    const lastInvoice = await this.purchaseRepository.findOne({
+      where: {
+        invoiceNumber: Like(`ORD-${currentYear}-%`)
+      },
+      order: { invoiceNumber: 'DESC' },
+      withDeleted: false
+    });
+
+    let sequence = 1;
+    if (lastInvoice && lastInvoice.invoiceNumber) {
+      const parts = lastInvoice.invoiceNumber.split('-');
+      if (parts.length === 3) {
+        const lastSequence = parseInt(parts[2]);
+        if (!isNaN(lastSequence)) {
+          sequence = lastSequence + 1;
+        }
+      }
+    }
+
+    const nextNumber = `ORD-${currentYear}-${sequence.toString().padStart(4, '0')}`;
+
+    this.purchaseGateway.broadcastNextInvoiceNumber(nextNumber)
+    
+    return { nextNumber };
   }
 }

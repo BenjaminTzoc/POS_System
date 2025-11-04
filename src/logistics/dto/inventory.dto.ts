@@ -3,6 +3,7 @@ import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { ProductResponseDto } from './product.dto';
 import { BranchResponseDto } from './branch.dto';
+import { UnitResponseDto } from '.';
 
 export class CreateInventoryDto {
   @IsNotEmpty()
@@ -46,14 +47,98 @@ export class UpdateInventoryDto {
   maxStock?: number;
 }
 
-export class InventoryResponseDto extends BaseEntity {
+class InventoryBranchResponse extends BaseEntity {
   @Expose()
-  @Type(() => ProductResponseDto)
-  product: ProductResponseDto;
+  name: string;
+
+  @Exclude()
+  address: string;
+
+  @Exclude()
+  phone: string;
+
+  @Exclude()
+  email: string;
+
+  @Exclude()
+  declare createdAt: Date;
+
+  @Exclude()
+  declare updatedAt: Date;
+
+  @Exclude()
+  declare deletedAt: Date | null;
+}
+
+class InventoryCategoryResponse extends BaseEntity {
+  @Expose()
+  name: string;
+
+  @Exclude()
+  description: string;
+
+  @Exclude()
+  @Type(() => UnitResponseDto)
+  defaultUnit: UnitResponseDto | null;
+
+  @Exclude()
+  declare createdAt: Date;
+
+  @Exclude()
+  declare updatedAt: Date;
+
+  @Exclude()
+  declare deletedAt: Date | null;
+}
+
+class InventoryProductResponse extends BaseEntity {
+  @Expose()
+  name: string;
+
+  @Exclude()
+  description: string;
 
   @Expose()
-  @Type(() => BranchResponseDto)
-  branch: BranchResponseDto;
+  sku: string;
+
+  @Expose()
+  barcode: string;
+
+  @Exclude()
+  cost: number;
+
+  @Expose()
+  price: number;
+
+  @Expose()
+  imageUrl: string | null;
+
+  @Expose()
+  @Type(() => InventoryCategoryResponse)
+  category: InventoryCategoryResponse | null;
+
+  @Expose()
+  @Type(() => UnitResponseDto)
+  unit: UnitResponseDto | null;
+
+  @Exclude()
+  declare createdAt: Date;
+
+  @Exclude()
+  declare updatedAt: Date;
+
+  @Exclude()
+  declare deletedAt: Date | null;
+}
+
+export class InventoryResponseDto extends BaseEntity {
+  @Expose()
+  @Type(() => InventoryProductResponse)
+  product: InventoryProductResponse;
+
+  @Expose()
+  @Type(() => InventoryBranchResponse)
+  branch: InventoryBranchResponse;
 
   @Expose()
   stock: number;
@@ -70,7 +155,7 @@ export class InventoryResponseDto extends BaseEntity {
   @Expose()
   declare createdAt: Date;
 
-  @Expose()
+  @Exclude()
   declare updatedAt: Date;
 
   @Exclude()

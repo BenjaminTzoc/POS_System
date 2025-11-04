@@ -15,17 +15,20 @@ export class ProductController {
   @Public()
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(FileInterceptor('image'))
-  create(
-    @Body() dto: CreateProductDto, 
-    @UploadedFile() image?: any,
-  ): Promise<ProductResponseDto> {
-    return this.productService.create(dto, image);
+  async create(
+    @Body() dto: CreateProductDto,
+    @UploadedFile() image?: Express.Multer.File,
+  ) {
+    const product = await this.productService.createWithInventory(dto, image);
+    return { id: product.id }
   }
 
   @Get()
   @Public()
-  findAll(): Promise<ProductResponseDto[]> {
-    return this.productService.findAll();
+  async findAll(
+    @Query('branchId') branchId?: string,
+  ): Promise<ProductResponseDto[]> {
+    return this.productService.findAll(branchId);
   }
 
   @Get('search')

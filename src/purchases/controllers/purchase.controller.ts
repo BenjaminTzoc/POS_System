@@ -10,6 +10,14 @@ export class PurchaseController {
     private readonly purchaseService: PurchaseService,
   ) {}
 
+  @Get('next-number')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async getNextInvoiceNumber(): Promise<{ nextNumber: string }> {
+    const nextNumber = await this.purchaseService.generateNextInvoiceNumber();
+    return nextNumber;
+  }
+
   @Post()
   @Public()
   @HttpCode(HttpStatus.CREATED)

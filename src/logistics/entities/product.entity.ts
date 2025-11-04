@@ -5,6 +5,12 @@ import { Unit } from './unit.entity';
 import { Inventory } from './inventory.entity';
 import { InventoryMovement } from './inventory-movement.entity';
 
+export enum StockAvailability {
+  IN_STOCK = 'in_stock',
+  OUT_OF_STOCK = 'out_of_stock',
+  LIMITED = 'limited',
+}
+
 @Entity('products')
 export class Product extends BaseEntity {
   @Column({ length: 100 })
@@ -41,4 +47,20 @@ export class Product extends BaseEntity {
 
   @OneToMany(() => InventoryMovement, (movement) => movement.product)
   movements: InventoryMovement[];
+
+  @Column({ type: 'boolean', default: true })
+  manageStock: boolean;
+
+  @Column({ 
+    type: 'enum', 
+    enum: StockAvailability, 
+    default: StockAvailability.IN_STOCK 
+  })
+  stockAvailability: StockAvailability;
+
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  isVisible: boolean;
 }

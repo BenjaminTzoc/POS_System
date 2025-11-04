@@ -55,7 +55,7 @@ export class UpdateSupplierDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
-  @Matches(/^[0-9]+[0-9Kk]?$/, { message: 'El NIT debe tener un formato válido' })
+  @Matches(/^[0-9]+-[0-9Kk]$/, { message: 'El NIT debe tener un formato válido' })
   nit?: string;
 
   @IsOptional()

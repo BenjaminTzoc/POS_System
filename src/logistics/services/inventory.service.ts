@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Inventory } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -12,11 +12,12 @@ export class InventoryService {
   constructor(
     @InjectRepository(Inventory)
     private readonly inventoryRepository: Repository<Inventory>,
+    @Inject(forwardRef(() => ProductService))
     private readonly productService: ProductService,
     private readonly branchService: BranchService,
   ) {}
 
-   async create(dto: CreateInventoryDto): Promise<InventoryResponseDto> {
+  async create(dto: CreateInventoryDto): Promise<InventoryResponseDto> {
     // Verificar si el producto existe
     let product;
     try {
@@ -44,7 +45,7 @@ export class InventoryService {
 
     if (existingInventory) {
       throw new ConflictException(
-        `Ya existe un inventario para el producto ${product.name} en la sucursal ${branch.name}`,
+        `Ya existe un inventario para el producto: '${product.name}' en la sucursal: '${branch.name}'`,
       );
     }
 
@@ -67,6 +68,26 @@ export class InventoryService {
     const inventories = await this.inventoryRepository.find({
       where: { deletedAt: IsNull() },
       relations: ['product', 'product.category', 'product.unit', 'branch'],
+      select: {
+        id: true, 
+        product: {
+          id: true,
+          imageUrl: true,
+          name: true,
+          price: true,
+          category: {
+            id: true,
+            name: true,
+          }
+        },
+        branch: {
+          id: true,
+          name: true,
+        },
+        stock: true,
+        lastMovementDate: true,
+        createdAt: true, 
+      },
       order: { createdAt: 'DESC' },
     });
     return plainToInstance(InventoryResponseDto, inventories);

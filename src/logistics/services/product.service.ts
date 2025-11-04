@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Branch, Inventory, Product } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -7,31 +7,33 @@ import { UnitService } from './unit.service';
 import { CreateProductDto, ProductResponseDto, UpdateProductDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { FilesService } from './files.service';
+import { StockAvailability } from '../entities/product.entity';
+import { InventoryService } from './inventory.service';
 
 @Injectable()
 export class ProductService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
-    @InjectRepository(Inventory)
-    private readonly inventoryRepository: Repository<Inventory>,
     @InjectRepository(Branch)
     private readonly branchRepository: Repository<Branch>,
+    @InjectRepository(Inventory)
+    private readonly inventoryRepository: Repository<Inventory>,
+
     private readonly categoryService: CategoryService,
     private readonly unitService: UnitService,
     private readonly fileService: FilesService,
+    @Inject(forwardRef(() => InventoryService))
+    private readonly inventoryService: InventoryService,
   ) {}
 
-  async create(dto: CreateProductDto, imageFile?: any): Promise<ProductResponseDto> {
+  async createWithInventory(dto: CreateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
     // Verificar si el SKU ya existe
     const existingSku = await this.productRepository.findOne({
       where: { sku: dto.sku },
       withDeleted: false,
     });
-
-    if (existingSku) {
-      throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
-    }
+    if (existingSku) throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
 
     // Verificar si el código de barras ya existe (si se proporciona)
     if (dto.barcode) {
@@ -40,40 +42,26 @@ export class ProductService {
         withDeleted: false,
       });
 
-      if (existingBarcode) {
-        throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
-      }
+      if (existingBarcode) throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
     }
 
+    let imageUrl: string | undefined;
+    if (image) {
+      imageUrl = await this.fileService.saveProductImage(image);
+    }
+
+    // Validar y obtener la categoría y unidad si se proporcionan
     let category: any = null;
     let unit: any = null;
-    let imageUrl: string | undefined;
-
-    if (imageFile) {
-      imageUrl = await this.fileService.saveProductImage(imageFile);
-    }
-
-    // Validar y obtener la categoría si se proporciona
     if (dto.categoryId) {
-      try {
-        category = await this.categoryService.findOne(dto.categoryId);
-      } catch (error) {
+      category = await this.categoryService.findOne(dto.categoryId).catch(() => {
         throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
-      }
+      });
     }
-
-    // Validar y obtener la unidad si se proporciona
     if (dto.unitId) {
-      try {
-        unit = await this.unitService.findOne(dto.unitId);
-      } catch (error) {
+      unit = await this.unitService.findOne(dto.unitId).catch(() => {
         throw new BadRequestException(`La unidad con ID ${dto.unitId} no existe`);
-      }
-    }
-
-    // Validar que el precio sea mayor o igual al costo
-    if (dto.price < dto.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
+      })
     }
 
     const product = this.productRepository.create({
@@ -86,19 +74,78 @@ export class ProductService {
       imageUrl: imageUrl,
       category: category,
       unit: unit,
+      manageStock: dto.manageStock ?? true,
+      stockAvailability: dto.stockAvailability ?? StockAvailability.IN_STOCK,
     });
 
     const savedProduct = await this.productRepository.save(product);
-    return plainToInstance(ProductResponseDto, savedProduct);
+
+    if (dto.manageStock && dto.initialStocks?.length) {
+      for (const stockItem of dto.initialStocks) {
+        const branch = await this.branchRepository.findOne({
+          where: { id: stockItem.branchId },
+          withDeleted: false,
+        });
+        if (!branch) throw new NotFoundException(`Sucursal con ID ${stockItem.branchId} no encontrada`);
+
+        const inventory = this.inventoryRepository.create({
+          product: savedProduct,
+          branch,
+          stock: stockItem.quantity,
+          minStock: 0,
+          maxStock: null,
+        });
+
+        await this.inventoryRepository.save(inventory);
+      }
+    }
+
+    return plainToInstance(ProductResponseDto, savedProduct, { excludeExtraneousValues: true });
   }
 
-  async findAll(): Promise<ProductResponseDto[]> {
-    const products = await this.productRepository.find({
-      where: { deletedAt: IsNull() },
-      relations: ['category', 'unit', 'category.defaultUnit'],
-      order: { name: 'ASC' },
+  async findAll(branchId?: string): Promise<ProductResponseDto[]> {
+    const query = this.productRepository
+    .createQueryBuilder('product')
+    .leftJoinAndSelect('product.category', 'category')
+    .leftJoinAndSelect('product.unit', 'unit')
+    .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
+    .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id')
+    .where('product.deletedAt IS NULL');
+
+    if (branchId) {
+      query.andWhere('inventory.branch_id = :branchId', { branchId });
+    }
+
+    query.orderBy('product.name', 'ASC');
+
+    const products = await query
+      .select([
+        'product.id',
+        'product.name',
+        'product.sku',
+        'product.barcode',
+        'product.description',
+        'product.cost',
+        'product.price',
+        'product.imageUrl',
+        'category.id',
+        'category.name',
+        'unit.id',
+        'unit.abbreviation',
+        // SUMA del stock (por sucursal o total)
+        'COALESCE(SUM(inventory.stock), 0) AS stock',
+      ])
+      .groupBy('product.id')
+      .addGroupBy('category.id')
+      .addGroupBy('unit.id')
+      .addGroupBy('defaultUnit.id')
+      .getRawAndEntities();
+
+    // Mezclar resultados crudos (stock) con entidades
+    return products.entities.map((p, i) => {
+      const stock = Number(products.raw[i].stock);
+      return plainToInstance(ProductResponseDto, { ...p, stock });
     });
-    return plainToInstance(ProductResponseDto, products);
   }
 
   async findOne(id: string): Promise<ProductResponseDto> {

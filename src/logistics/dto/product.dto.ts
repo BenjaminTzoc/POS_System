@@ -1,8 +1,20 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min, isString, IsEnum, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min, isString, IsEnum, IsBoolean, ValidateNested, ArrayMinSize } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { CategoryResponseDto } from './category.dto';
 import { UnitResponseDto } from './unit.dto';
+import { StockAvailability } from '../entities/product.entity';
+
+class InitialStockDto {
+  @IsNotEmpty()
+  @IsUUID()
+  branchId: string;
+
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  quantity: number;
+}
 
 export class CreateProductDto {
   @IsNotEmpty()
@@ -31,7 +43,7 @@ export class CreateProductDto {
 
   @IsNotEmpty()
   @IsNumber()
-  @Min(0)
+  @Min(0.01)
   price: number;
 
   @IsOptional()
@@ -41,6 +53,27 @@ export class CreateProductDto {
   @IsOptional()
   @IsUUID()
   unitId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  manageStock?: boolean;
+
+  @IsOptional()
+  @IsEnum(StockAvailability)
+  stockAvailability?: StockAvailability;
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => InitialStockDto)
+  initialStocks?: InitialStockDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isVisible?: boolean;
 }
 
 export class UpdateProductDto {
@@ -84,6 +117,14 @@ export class UpdateProductDto {
   @IsOptional()
   @IsUUID()
   unitId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  manageStock?: boolean;
+
+  @IsOptional()
+  @IsEnum(StockAvailability)
+  stockAvailability?: StockAvailability;
 }
 
 export class ProductResponseDto extends BaseEntity {
@@ -116,10 +157,10 @@ export class ProductResponseDto extends BaseEntity {
   @Type(() => UnitResponseDto)
   unit: UnitResponseDto | null;
 
-  @Expose()
+  @Exclude()
   declare createdAt: Date;
 
-  @Expose()
+  @Exclude()
   declare updatedAt: Date;
 
   @Exclude()
