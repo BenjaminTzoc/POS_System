@@ -10,7 +10,8 @@ export class RolesController {
   ) {}
 
   @Post()
-  @Permissions('roles.create')
+  @Public()
+  // @Permissions('roles.create')
   @HttpCode(HttpStatus.CREATED)
   createRole(@Body() dto: CreateRoleDto): Promise<RoleResponseDto> {
     return this.authService.createRole(dto);

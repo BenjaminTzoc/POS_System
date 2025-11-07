@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, IsDateString, Min, Max, ValidateNested, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, IsDateString, Min, Max, ValidateNested, IsArray, MaxLength } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from 'typeorm';
 import { SaleStatus, SaleType } from '../entities';
@@ -7,19 +7,20 @@ import { CreateSaleDetailDto, CustomerResponseDto, DiscountCodeResponseDto, Sale
 export class CreateSaleDto {
   @IsNotEmpty()
   @IsString()
+  @MaxLength(50)
   invoiceNumber: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsDateString()
-  date: string;
+  date?: string;
 
   @IsOptional()
   @IsEnum(SaleType)
   type?: SaleType;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsUUID()
-  customerId?: string;
+  customerId: string;
 
   @IsOptional()
   @IsUUID()

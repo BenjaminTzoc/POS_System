@@ -3,10 +3,20 @@ import { BaseEntity } from '../../common/entities/base.entity';
 import { Customer, DiscountCode, SaleDetail, SalePayment } from '.';
 
 export enum SaleStatus {
-  PENDING = 'pending',
-  CONFIRMED = 'confirmed',
-  DELIVERED = 'delivered',
-  CANCELLED = 'cancelled'
+  // Estados de Proceso
+  PENDING = 'pending',  // Pendiente de pago/confirmación
+  CONFIRMED = 'confirmed',  // Confirmada y pagada
+  PREPARING = 'preparing',  // En preparación/procesamiento
+
+  // Estados de Entrega
+  READY_FOR_PICKUP = 'ready_for_pickup', // Lista para recoger en tienda
+  OUT_FOR_DELIVERY = 'out_for_delivery',  // En camino al cliente
+  DELIVERED = 'delivered',  // Entregada completamente
+
+  // Estados de Problemas
+  PARTIALLY_DELIVERED = 'partially_delivered',  // Entregada parcialmente
+  CANCELLED = 'cancelled', // Cancelada
+  ON_HOLD = 'on_hold'  // En espera (stock, etc.)
 }
 
 export enum SaleType {
@@ -19,7 +29,7 @@ export class Sale extends BaseEntity {
   @Column({ name: 'invoice_number', length: 50, unique: true })
   invoiceNumber: string;
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP', nullable: true })
   date: Date;
 
   @Column({ type: 'enum', enum: SaleType, default: SaleType.RETAIL })

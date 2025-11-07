@@ -10,6 +10,7 @@ export class UsersController {
   ) {}
 
   @Post()
+  @Public()
   // @Permissions('users.create')
   @HttpCode(HttpStatus.CREATED)
   createUser(@Body() dto: CreateUserDto): Promise<UserResponseDto> {

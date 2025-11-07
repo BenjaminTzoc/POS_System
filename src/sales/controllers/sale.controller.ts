@@ -2,14 +2,16 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import { SaleService } from '../services';
 import { CreateSaleDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { SaleStatus, SaleType } from '../entities';
+import { Public } from 'src/auth/decorators';
 
-@Controller('sale')
+@Controller('sales')
 export class SaleController {
   constructor(
     private readonly saleService: SaleService,
   ) {}
 
   @Post()
+  @Public()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateSaleDto): Promise<SaleResponseDto> {
     return this.saleService.create(dto);
@@ -31,6 +33,7 @@ export class SaleController {
   }
 
   @Get()
+  @Public()
   findAll(): Promise<SaleResponseDto[]> {
     return this.saleService.findAll();
   }

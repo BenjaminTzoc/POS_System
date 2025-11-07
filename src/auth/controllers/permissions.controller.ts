@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
 import { AuthService } from 'src/auth/auth.service';
 import { CreatePermissionDto, PermissionResponseDto, UpdatePermissionDto } from 'src/auth/dto';
-import { Permissions } from '../decorators';
+import { Permissions, Public } from '../decorators';
 
 @Controller('permissions')
 export class PermissionsController {
@@ -10,7 +10,8 @@ export class PermissionsController {
   ) {}
 
   @Post()
-  @Permissions('permissions.create')
+  @Public()
+  // @Permissions('permissions.create')
   @HttpCode(HttpStatus.CREATED)
   createPermission(@Body() dto: CreatePermissionDto): Promise<PermissionResponseDto> {
     return this.authService.createPermission(dto);

@@ -33,23 +33,21 @@ export class SaleService {
       throw new ConflictException(`La factura ${dto.invoiceNumber} ya existe`);
     }
 
+    // Validar que el cliente existe
+    let customer;
+    try {
+      customer = await this.customerService.findOne(dto.customerId);
+    } catch (error) {
+      throw new BadRequestException(`El proveedor con ID ${dto.customerId} no existe`);
+    }
+
     // Validar detalles de la venta
     if (!dto.details || dto.details.length === 0) {
       throw new BadRequestException('La venta debe tener al menos un detalle');
     }
 
-    let customer: any = null;
     let discountCode: any = null;
     let discountValidation: any = null;
-
-    // Validar cliente si se proporciona
-    if (dto.customerId) {
-      try {
-        customer = await this.customerService.findOne(dto.customerId);
-      } catch (error) {
-        throw new BadRequestException(`El cliente con ID ${dto.customerId} no existe`);
-      }
-    }
 
     // Validar código de descuento si se proporciona
     if (dto.discountCodeId) {
@@ -95,13 +93,19 @@ export class SaleService {
       // Crear la venta
       const sale = queryRunner.manager.create(Sale, {
         invoiceNumber: dto.invoiceNumber,
-        date: new Date(dto.date),
-        type: dto.type || SaleType.RETAIL,
-        status: SaleStatus.PENDING,
+        date: dto.date ? new Date(dto.date) : new Date(),
         customer: customer ? { id: dto.customerId } : null,
+        subtotal: 0,
+        taxAmount: 0,
+        discountAmount: 0,
+        total: 0,
+        paidAmount: 0,
+        pendingAmount: 0,
+        type: dto.type || SaleType.RETAIL,
         discountCode: discountCode ? { id: dto.discountCodeId } : null,
         loyaltyPointsRedeemed: dto.loyaltyPointsRedeemed || 0,
         notes: dto.notes,
+        status: SaleStatus.PENDING,
       });
 
       const savedSale = await queryRunner.manager.save(sale);
@@ -122,9 +126,10 @@ export class SaleService {
 
         // Calcular montos del detalle
         const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
-        const lineDiscount = detailDto.discountAmount || (lineSubtotal * (detailDto.discount || 0) / 100);
-        const lineTax = detailDto.taxAmount || (lineSubtotal * (detailDto.taxPercentage || 0) / 100);
-        const lineTotal = lineSubtotal - lineDiscount + lineTax;
+        const lineDiscount = lineSubtotal * (detailDto.discount || 0) / 100;
+        const subtotalAfterDiscount = lineSubtotal - lineDiscount;
+        const lineTax = subtotalAfterDiscount * (detailDto.taxPercentage || 0) / 100;
+        const lineTotal = subtotalAfterDiscount + lineTax;
 
         const detail = queryRunner.manager.create(SaleDetail, {
           sale: savedSale,
@@ -163,8 +168,8 @@ export class SaleService {
       // Actualizar la venta con los totales calculados
       await queryRunner.manager.update(Sale, savedSale.id, {
         subtotal,
-        taxAmount,
         discountAmount,
+        taxAmount,
         categoryDiscount,
         codeDiscount,
         total,
