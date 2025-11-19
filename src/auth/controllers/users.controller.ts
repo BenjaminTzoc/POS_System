@@ -1,13 +1,23 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { AuthService } from '../auth.service';
 import { CreateUserDto, UpdateUserDto, UserResponseDto } from '../dto';
 import { Permissions, Public } from '../decorators';
 
 @Controller('users')
 export class UsersController {
-  constructor(
-    private readonly authService: AuthService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Post()
   @Public()
@@ -26,14 +36,16 @@ export class UsersController {
 
   @Get(':id')
   // @Permissions('users.read')
-  findOneUser(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
+  findOneUser(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserResponseDto> {
     return this.authService.findOneUser(id);
   }
 
-  @Get('email/:email')
-  findUserByEmail(@Param('email') email: string): Promise<UserResponseDto> {
-    return this.authService.findUserByEmail(email);
-  }
+  // @Get('email/:email')
+  // findUserByEmail(@Param('email') email: string): Promise<UserResponseDto> {
+  //   return this.authService.findUserByEmail(email);
+  // }
 
   @Put(':id')
   // @Permissions('users.update')
@@ -47,13 +59,17 @@ export class UsersController {
   @Delete(':id')
   // @Permissions('users.delete')
   @HttpCode(HttpStatus.OK)
-  removeUser(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
+  removeUser(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ message: string }> {
     return this.authService.removeUser(id);
   }
 
   @Patch(':id/restore')
   @HttpCode(HttpStatus.OK)
-  restoreUser(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
+  restoreUser(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserResponseDto> {
     return this.authService.restoreUser(id);
   }
 
@@ -63,7 +79,7 @@ export class UsersController {
   login(
     @Body('email') email: string,
     @Body('password') password: string,
-  ): Promise<{ user: UserResponseDto, accessToken: string }> {
+  ): Promise<{ user: UserResponseDto; accessToken: string }> {
     return this.authService.validateUser(email, password);
   }
 }

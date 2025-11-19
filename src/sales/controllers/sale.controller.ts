@@ -1,14 +1,31 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { SaleService } from '../services';
 import { CreateSaleDto, SaleResponseDto, UpdateSaleDto } from '../dto';
-import { SaleStatus, SaleType } from '../entities';
+import { SaleStatus } from '../entities';
 import { Public } from 'src/auth/decorators';
 
 @Controller('sales')
 export class SaleController {
-  constructor(
-    private readonly saleService: SaleService,
-  ) {}
+  constructor(private readonly saleService: SaleService) {}
+
+  @Get('next-number')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  async getNextInvoiceNumber(): Promise<{ nextNumber: string }> {
+    const nextNumber = await this.saleService.generateNextInvoiceNumber();
+    return nextNumber;
+  }
 
   @Post()
   @Public()
@@ -39,12 +56,16 @@ export class SaleController {
   }
 
   @Get('customer/:customerId')
-  findByCustomer(@Param('customerId', ParseUUIDPipe) customerId: string): Promise<SaleResponseDto[]> {
+  findByCustomer(
+    @Param('customerId', ParseUUIDPipe) customerId: string,
+  ): Promise<SaleResponseDto[]> {
     return this.saleService.findByCustomer(customerId);
   }
 
   @Get('status/:status')
-  findByStatus(@Param('status') status: SaleStatus): Promise<SaleResponseDto[]> {
+  findByStatus(
+    @Param('status') status: SaleStatus,
+  ): Promise<SaleResponseDto[]> {
     return this.saleService.findByStatus(status);
   }
 
@@ -53,31 +74,31 @@ export class SaleController {
     return this.saleService.getDailySales(date);
   }
 
-  @Get('stats')
-  getStats(): Promise<{
-    total: number;
-    pending: number;
-    confirmed: number;
-    cancelled: number;
-    totalAmount: number;
-    averageSale: number;
-    byType: Record<SaleType, number>;
-  }> {
-    return this.saleService.getSaleStats();
-  }
+  // @Get('stats')
+  // getStats(): Promise<{
+  //   total: number;
+  //   pending: number;
+  //   confirmed: number;
+  //   cancelled: number;
+  //   totalAmount: number;
+  //   averageSale: number;
+  //   byType: Record<SaleType, number>;
+  // }> {
+  //   return this.saleService.getSaleStats();
+  // }
 
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SaleResponseDto> {
     return this.saleService.findOne(id);
   }
 
-  @Put(':id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateSaleDto,
-  ): Promise<SaleResponseDto> {
-    return this.saleService.update(id, dto);
-  }
+  // @Put(':id')
+  // update(
+  //   @Param('id', ParseUUIDPipe) id: string,
+  //   @Body() dto: UpdateSaleDto,
+  // ): Promise<SaleResponseDto> {
+  //   return this.saleService.update(id, dto);
+  // }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)

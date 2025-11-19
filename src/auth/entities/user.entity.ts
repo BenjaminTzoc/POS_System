@@ -1,7 +1,15 @@
-import { Entity, Column, ManyToOne, JoinColumn, ManyToMany, JoinTable } from 'typeorm';
+import {
+  Entity,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  ManyToMany,
+  JoinTable,
+} from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Role } from './role.entity';
 import { Permission } from './permission.entity';
+import { Branch } from 'src/logistics/entities';
 
 @Entity('users')
 export class User extends BaseEntity {
@@ -23,6 +31,10 @@ export class User extends BaseEntity {
   @ManyToOne(() => Role, { eager: true, nullable: false })
   @JoinColumn({ name: 'role_id' })
   role: Role;
+
+  @ManyToOne(() => Branch, { eager: true, nullable: true })
+  @JoinColumn({ name: 'branch_id' })
+  branch: Branch;
 
   @ManyToMany(() => Permission, { eager: true })
   @JoinTable({

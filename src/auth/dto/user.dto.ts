@@ -1,7 +1,19 @@
-import { IsString, IsOptional, IsNotEmpty, IsEmail, IsBoolean, IsArray, ValidateNested, MinLength, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  IsEmail,
+  IsBoolean,
+  IsArray,
+  ValidateNested,
+  MinLength,
+  MaxLength,
+  IsUUID,
+} from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { PermissionResponseDto, RoleResponseDto } from '.';
 import { BaseEntity } from 'src/common/entities';
+import { BranchResponseDto } from 'src/logistics/dto';
 
 export class CreateUserDto {
   @IsNotEmpty()
@@ -23,10 +35,13 @@ export class CreateUserDto {
   @IsString()
   roleId: string;
 
+  @IsNotEmpty()
+  @IsUUID()
+  branchId: string;
+
   @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => String)
+  @IsUUID('4', { each: true })
   permissionIds?: string[];
 }
 
@@ -51,13 +66,16 @@ export class UpdateUserDto {
   roleId?: string;
 
   @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
+  @IsOptional()
   @IsBoolean()
   emailVerified?: boolean;
 
   @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => String)
+  @IsUUID('4', { each: true })
   permissionIds?: string[];
 }
 
@@ -77,6 +95,10 @@ export class UserResponseDto extends BaseEntity {
   @Expose()
   @Type(() => RoleResponseDto)
   role: RoleResponseDto;
+
+  @Expose()
+  @Type(() => BranchResponseDto) // 🔥 Nuevo campo
+  branch: BranchResponseDto;
 
   @Expose()
   @Type(() => PermissionResponseDto)

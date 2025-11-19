@@ -1,12 +1,23 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Sale, SaleDetail, SaleStatus, SaleType } from '../entities';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { Sale, SaleDetail, SaleStatus } from '../entities';
+import { DataSource, IsNull, Like, Repository } from 'typeorm';
 import { CustomerService, DiscountCodeService } from '.';
-import { InventoryMovementService, ProductService } from 'src/logistics/services';
+import {
+  BranchService,
+  InventoryMovementService,
+  ProductService,
+} from 'src/logistics/services';
 import { CreateSaleDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { MovementStatus, MovementType } from 'src/logistics/entities';
+import { SaleGateway } from '../gateway/sale.gateway';
+import { SaleDiscount } from '../entities/sale-discount.entity';
 
 @Injectable()
 export class SaleService {
@@ -15,123 +26,124 @@ export class SaleService {
     private readonly saleRepository: Repository<Sale>,
     @InjectRepository(SaleDetail)
     private readonly saleDetailRepository: Repository<SaleDetail>,
+
     private readonly customerService: CustomerService,
+    private readonly branchService: BranchService,
     private readonly discountCodeService: DiscountCodeService,
     private readonly productService: ProductService,
     private readonly inventoryMovementService: InventoryMovementService,
     private readonly dataSource: DataSource,
+    private readonly saleGateway: SaleGateway,
   ) {}
 
   async create(dto: CreateSaleDto): Promise<SaleResponseDto> {
-    // Verificar si el número de factura ya existe
     const existingInvoice = await this.saleRepository.findOne({
       where: { invoiceNumber: dto.invoiceNumber },
       withDeleted: false,
     });
 
-    if (existingInvoice) {
+    if (existingInvoice)
       throw new ConflictException(`La factura ${dto.invoiceNumber} ya existe`);
+
+    if (dto.customerId && dto.guestCustomer) {
+      throw new BadRequestException(
+        'No puede proporcionar customerId y guestCustomer al mismo tiempo.',
+      );
     }
 
-    // Validar que el cliente existe
-    let customer;
-    try {
-      customer = await this.customerService.findOne(dto.customerId);
-    } catch (error) {
-      throw new BadRequestException(`El proveedor con ID ${dto.customerId} no existe`);
+    if (!dto.customerId && !dto.guestCustomer) {
+      throw new BadRequestException(
+        'Debe proporcionar customerId o guestCustomer.',
+      );
     }
 
-    // Validar detalles de la venta
-    if (!dto.details || dto.details.length === 0) {
+    let customer: any = null;
+
+    if (dto.customerId) {
+      try {
+        customer = await this.customerService.findOne(dto.customerId);
+      } catch {
+        throw new BadRequestException(
+          `El cliente con ID ${dto.customerId} no existe`,
+        );
+      }
+    }
+
+    const branch = await this.branchService.findOne(dto.branchId);
+    if (!dto.details?.length)
       throw new BadRequestException('La venta debe tener al menos un detalle');
-    }
 
     let discountCode: any = null;
-    let discountValidation: any = null;
+    let discountCodeAmount: number = 0;
 
-    // Validar código de descuento si se proporciona
     if (dto.discountCodeId) {
-      try {
-        discountCode = await this.discountCodeService.findOne(dto.discountCodeId);
-        
-        // Validar el código de descuento para esta venta
-        const purchaseAmount = dto.details.reduce((sum, detail) => 
-          sum + (detail.quantity * detail.unitPrice), 0
-        );
-        
-        discountValidation = await this.discountCodeService.validateDiscountCode(
-          discountCode.code,
-          dto.customerId,
-          undefined, // productId se valida por detalle
-          purchaseAmount
-        );
+      discountCode = await this.discountCodeService.findOne(dto.discountCodeId);
 
-        if (!discountValidation.isValid) {
-          throw new BadRequestException(`Código de descuento inválido: ${discountValidation.message}`);
-        }
-      } catch (error) {
-        throw new BadRequestException(`El código de descuento con ID ${dto.discountCodeId} no existe`);
+      const subtotalPrecalc = dto.details.reduce(
+        (sum, d) => sum + d.quantity * d.unitPrice,
+        0,
+      );
+
+      const validation = await this.discountCodeService.validateDiscountCode(
+        discountCode.code,
+        dto.customerId,
+        undefined,
+        subtotalPrecalc,
+      );
+
+      if (!validation.isValid) {
+        throw new BadRequestException(
+          `Código de descuento inválido: ${validation.message}`,
+        );
       }
+
+      discountCodeAmount = validation.discountAmount;
     }
 
-    // Validar puntos de lealtad si se redimen
-    if (dto.loyaltyPointsRedeemed && dto.loyaltyPointsRedeemed > 0) {
-      if (!customer) {
-        throw new BadRequestException('Se requiere un cliente para redimir puntos de lealtad');
-      }
-      
-      if (customer.loyaltyPoints < dto.loyaltyPointsRedeemed) {
-        throw new BadRequestException('El cliente no tiene suficientes puntos para redimir');
-      }
-    }
-
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
 
     try {
-      // Crear la venta
-      const sale = queryRunner.manager.create(Sale, {
+      // Crear venta base
+      const sale = qr.manager.create(Sale, {
         invoiceNumber: dto.invoiceNumber,
         date: dto.date ? new Date(dto.date) : new Date(),
-        customer: customer ? { id: dto.customerId } : null,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        status: SaleStatus.PENDING,
+        notes: dto.notes || null,
+        customer: dto.customerId ? { id: dto.customerId } : undefined,
+        guestCustomer: dto.guestCustomer ?? undefined,
+        branch: { id: dto.branchId },
+        discountCode: dto.discountCodeId ? { id: dto.discountCodeId } : null,
+
+        // Se actualizan después
         subtotal: 0,
         taxAmount: 0,
         discountAmount: 0,
         total: 0,
         paidAmount: 0,
         pendingAmount: 0,
-        type: dto.type || SaleType.RETAIL,
-        discountCode: discountCode ? { id: dto.discountCodeId } : null,
-        loyaltyPointsRedeemed: dto.loyaltyPointsRedeemed || 0,
-        notes: dto.notes,
-        status: SaleStatus.PENDING,
       });
 
-      const savedSale = await queryRunner.manager.save(sale);
+      const savedSale = await qr.manager.save(sale);
 
-      // Crear detalles de la venta y calcular totales
+      // ---------------- DETALLES ----------------
       let subtotal = 0;
       let taxAmount = 0;
-      let discountAmount = 0;
+      let lineDiscounts = 0;
 
       for (const detailDto of dto.details) {
-        // Validar que el producto existe y tiene stock
-        let product;
-        try {
-          product = await this.productService.findOne(detailDto.productId);
-        } catch (error) {
-          throw new BadRequestException(`El producto con ID ${detailDto.productId} no existe`);
-        }
+        const product = await this.productService.findOne(detailDto.productId);
 
-        // Calcular montos del detalle
         const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
-        const lineDiscount = lineSubtotal * (detailDto.discount || 0) / 100;
-        const subtotalAfterDiscount = lineSubtotal - lineDiscount;
-        const lineTax = subtotalAfterDiscount * (detailDto.taxPercentage || 0) / 100;
-        const lineTotal = subtotalAfterDiscount + lineTax;
+        const lineDiscount = (lineSubtotal * (detailDto.discount || 0)) / 100;
+        const lineAfterDiscount = lineSubtotal - lineDiscount;
+        const lineTax =
+          (lineAfterDiscount * (detailDto.taxPercentage || 0)) / 100;
+        const lineTotal = lineAfterDiscount + lineTax;
 
-        const detail = queryRunner.manager.create(SaleDetail, {
+        const detail = qr.manager.create(SaleDetail, {
           sale: savedSale,
           product: { id: detailDto.productId },
           quantity: detailDto.quantity,
@@ -140,50 +152,72 @@ export class SaleService {
           discountAmount: lineDiscount,
           taxPercentage: detailDto.taxPercentage || 0,
           taxAmount: lineTax,
-          lineTotal: lineTotal,
+          lineTotal,
         });
 
-        await queryRunner.manager.save(detail);
+        await qr.manager.save(detail);
 
         subtotal += lineSubtotal;
-        discountAmount += lineDiscount;
+        lineDiscounts += lineDiscount;
         taxAmount += lineTax;
       }
 
-      // Calcular descuentos adicionales
-      let categoryDiscount = 0;
-      let codeDiscount = discountValidation?.discountAmount || 0;
+      // ---------------- DESCUENTOS GLOBALES (SaleDiscount) ----------------
+      let manualDiscountsAmount = 0;
 
-      // Aplicar descuento de categoría si hay cliente con categoría
-      if (customer?.category?.discountPercentage) {
-        categoryDiscount = subtotal * (customer.category.discountPercentage / 100);
+      if (dto.discounts?.length) {
+        for (const disDto of dto.discounts) {
+          let amount = 0;
+
+          if (disDto.type === 'percent') {
+            amount = subtotal * (disDto.value / 100);
+          } else {
+            amount = disDto.value;
+          }
+
+          manualDiscountsAmount += amount;
+
+          const saleDiscount = qr.manager.create(SaleDiscount, {
+            sale: savedSale,
+            type: disDto.type,
+            value: disDto.value,
+            amountApplied: amount,
+            reason: disDto.reason || null,
+          });
+
+          await qr.manager.save(saleDiscount);
+        }
       }
 
-      // Calcular total final
-      const total = subtotal - discountAmount - categoryDiscount - codeDiscount + taxAmount;
+      // ---------------- TOTAL FINAL ----------------
+      const totalDiscounts =
+        lineDiscounts + manualDiscountsAmount + discountCodeAmount;
 
-      // Calcular puntos de lealtad ganados (1 punto por cada Q10 de compra)
-      const loyaltyPointsEarned = Math.floor(total / 10);
+      const total = subtotal - totalDiscounts + taxAmount;
 
-      // Actualizar la venta con los totales calculados
-      await queryRunner.manager.update(Sale, savedSale.id, {
+      await qr.manager.update(Sale, savedSale.id, {
         subtotal,
-        discountAmount,
         taxAmount,
-        categoryDiscount,
-        codeDiscount,
+        discountAmount: totalDiscounts,
         total,
         pendingAmount: total,
-        loyaltyPointsEarned,
       });
 
-      await queryRunner.commitTransaction();
-      return this.findOne(savedSale.id);
+      await qr.commitTransaction();
+
+      const finalSale = await this.findOne(savedSale.id);
+
+      this.saleGateway.notifyNewSale(finalSale);
+
+      const nextNumber = await this.generateNextInvoiceNumber();
+      this.saleGateway.broadcastNextInvoiceNumber(nextNumber.nextNumber);
+
+      return finalSale;
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      await qr.rollbackTransaction();
       throw error;
     } finally {
-      await queryRunner.release();
+      await qr.release();
     }
   }
 
@@ -191,13 +225,13 @@ export class SaleService {
     const sales = await this.saleRepository.find({
       where: { deletedAt: IsNull() },
       relations: [
-        'customer', 
-        'customer.category', 
-        'discountCode', 
-        'details', 
+        'customer',
+        'customer.category',
+        'discountCode',
+        'details',
         'details.product',
         'payments',
-        'payments.paymentMethod'
+        'payments.paymentMethod',
       ],
       order: { date: 'DESC', createdAt: 'DESC' },
     });
@@ -208,13 +242,13 @@ export class SaleService {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: [
-        'customer', 
-        'customer.category', 
-        'discountCode', 
-        'details', 
+        'customer',
+        'customer.category',
+        'discountCode',
+        'details',
         'details.product',
         'payments',
-        'payments.paymentMethod'
+        'payments.paymentMethod',
       ],
     });
 
@@ -227,16 +261,16 @@ export class SaleService {
 
   async findByCustomer(customerId: string): Promise<SaleResponseDto[]> {
     const sales = await this.saleRepository.find({
-      where: { 
+      where: {
         customer: { id: customerId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: [
-        'customer', 
-        'customer.category', 
-        'discountCode', 
-        'details', 
-        'details.product'
+        'customer',
+        'customer.category',
+        'discountCode',
+        'details',
+        'details.product',
       ],
       order: { date: 'DESC' },
     });
@@ -247,11 +281,11 @@ export class SaleService {
     const sales = await this.saleRepository.find({
       where: { status, deletedAt: IsNull() },
       relations: [
-        'customer', 
-        'customer.category', 
-        'discountCode', 
-        'details', 
-        'details.product'
+        'customer',
+        'customer.category',
+        'discountCode',
+        'details',
+        'details.product',
       ],
       order: { date: 'DESC' },
     });
@@ -269,7 +303,9 @@ export class SaleService {
     }
 
     if (sale.status !== SaleStatus.PENDING) {
-      throw new BadRequestException('Solo se pueden confirmar ventas pendientes');
+      throw new BadRequestException(
+        'Solo se pueden confirmar ventas pendientes',
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -297,22 +333,34 @@ export class SaleService {
 
       // Actualizar estadísticas del cliente si existe
       if (sale.customer) {
-        await this.customerService.updatePurchaseStats(sale.customer.id, sale.total);
-        
+        await this.customerService.updatePurchaseStats(
+          sale.customer.id,
+          sale.total,
+        );
+
         // Añadir puntos de lealtad
-        if (sale.loyaltyPointsEarned > 0) {
-          await this.customerService.addLoyaltyPoints(sale.customer.id, sale.loyaltyPointsEarned);
-        }
+        // if (sale.loyaltyPointsEarned > 0) {
+        //   await this.customerService.addLoyaltyPoints(
+        //     sale.customer.id,
+        //     sale.loyaltyPointsEarned,
+        //   );
+        // }
 
         // Redimir puntos si se especificó
-        if (sale.loyaltyPointsRedeemed > 0) {
-          await this.customerService.redeemLoyaltyPoints(sale.customer.id, sale.loyaltyPointsRedeemed);
-        }
+        // if (sale.loyaltyPointsRedeemed > 0) {
+        //   await this.customerService.redeemLoyaltyPoints(
+        //     sale.customer.id,
+        //     sale.loyaltyPointsRedeemed,
+        //   );
+        // }
       }
 
       // Aplicar código de descuento si existe
       if (sale.discountCode) {
-        await this.discountCodeService.applyDiscountCode(sale.discountCode.code, sale.id);
+        await this.discountCodeService.applyDiscountCode(
+          sale.discountCode.code,
+          sale.id,
+        );
       }
 
       await queryRunner.commitTransaction();
@@ -345,15 +393,21 @@ export class SaleService {
 
     try {
       // Revertir puntos de lealtad si la venta estaba confirmada
-      if (sale.status === SaleStatus.CONFIRMED && sale.customer) {
-        if (sale.loyaltyPointsEarned > 0) {
-          await this.customerService.redeemLoyaltyPoints(sale.customer.id, sale.loyaltyPointsEarned);
-        }
-        
-        if (sale.loyaltyPointsRedeemed > 0) {
-          await this.customerService.addLoyaltyPoints(sale.customer.id, sale.loyaltyPointsRedeemed);
-        }
-      }
+      // if (sale.status === SaleStatus.CONFIRMED && sale.customer) {
+      //   if (sale.loyaltyPointsEarned > 0) {
+      //     await this.customerService.redeemLoyaltyPoints(
+      //       sale.customer.id,
+      //       sale.loyaltyPointsEarned,
+      //     );
+      //   }
+
+      //   if (sale.loyaltyPointsRedeemed > 0) {
+      //     await this.customerService.addLoyaltyPoints(
+      //       sale.customer.id,
+      //       sale.loyaltyPointsRedeemed,
+      //     );
+      //   }
+      // }
 
       // Cancelar la venta
       sale.status = SaleStatus.CANCELLED;
@@ -369,52 +423,60 @@ export class SaleService {
     }
   }
 
-  async update(id: string, dto: UpdateSaleDto): Promise<SaleResponseDto> {
-    const sale = await this.saleRepository.findOne({
-      where: { id, deletedAt: IsNull() },
-    });
+  // async update(id: string, dto: UpdateSaleDto): Promise<SaleResponseDto> {
+  //   const sale = await this.saleRepository.findOne({
+  //     where: { id, deletedAt: IsNull() },
+  //   });
 
-    if (!sale) {
-      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
-    }
+  //   if (!sale) {
+  //     throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+  //   }
 
-    // Validar que no se pueda modificar una venta confirmada o cancelada
-    if (sale.status === SaleStatus.CONFIRMED || sale.status === SaleStatus.CANCELLED) {
-      throw new BadRequestException('No se puede modificar una venta confirmada o cancelada');
-    }
+  //   // Validar que no se pueda modificar una venta confirmada o cancelada
+  //   if (
+  //     sale.status === SaleStatus.CONFIRMED ||
+  //     sale.status === SaleStatus.CANCELLED
+  //   ) {
+  //     throw new BadRequestException(
+  //       'No se puede modificar una venta confirmada o cancelada',
+  //     );
+  //   }
 
-    // Verificar si el nuevo número de factura ya existe
-    if (dto.invoiceNumber && dto.invoiceNumber !== sale.invoiceNumber) {
-      const existingInvoice = await this.saleRepository.findOne({
-        where: { invoiceNumber: dto.invoiceNumber, deletedAt: IsNull() },
-      });
+  //   // Verificar si el nuevo número de factura ya existe
+  //   if (dto.invoiceNumber && dto.invoiceNumber !== sale.invoiceNumber) {
+  //     const existingInvoice = await this.saleRepository.findOne({
+  //       where: { invoiceNumber: dto.invoiceNumber, deletedAt: IsNull() },
+  //     });
 
-      if (existingInvoice) {
-        throw new ConflictException(`La factura ${dto.invoiceNumber} ya existe`);
-      }
-    }
+  //     if (existingInvoice) {
+  //       throw new ConflictException(
+  //         `La factura ${dto.invoiceNumber} ya existe`,
+  //       );
+  //     }
+  //   }
 
-    Object.assign(sale, {
-      invoiceNumber: dto.invoiceNumber ?? sale.invoiceNumber,
-      date: dto.date ? new Date(dto.date) : sale.date,
-      type: dto.type ?? sale.type,
-      status: dto.status ?? sale.status,
-      subtotal: dto.subtotal ?? sale.subtotal,
-      taxAmount: dto.taxAmount ?? sale.taxAmount,
-      discountAmount: dto.discountAmount ?? sale.discountAmount,
-      categoryDiscount: dto.categoryDiscount ?? sale.categoryDiscount,
-      codeDiscount: dto.codeDiscount ?? sale.codeDiscount,
-      total: dto.total ?? sale.total,
-      paidAmount: dto.paidAmount ?? sale.paidAmount,
-      pendingAmount: dto.pendingAmount ?? sale.pendingAmount,
-      loyaltyPointsEarned: dto.loyaltyPointsEarned ?? sale.loyaltyPointsEarned,
-      loyaltyPointsRedeemed: dto.loyaltyPointsRedeemed ?? sale.loyaltyPointsRedeemed,
-      notes: dto.notes ?? sale.notes,
-    });
+  //   Object.assign(sale, {
+  //     invoiceNumber: dto.invoiceNumber ?? sale.invoiceNumber,
+  //     date: dto.date ? new Date(dto.date) : sale.date,
+  //     type: dto.type ?? sale.type,
+  //     status: dto.status ?? sale.status,
+  //     subtotal: dto.subtotal ?? sale.subtotal,
+  //     taxAmount: dto.taxAmount ?? sale.taxAmount,
+  //     discountAmount: dto.discountAmount ?? sale.discountAmount,
+  //     categoryDiscount: dto.categoryDiscount ?? sale.categoryDiscount,
+  //     codeDiscount: dto.codeDiscount ?? sale.codeDiscount,
+  //     total: dto.total ?? sale.total,
+  //     paidAmount: dto.paidAmount ?? sale.paidAmount,
+  //     pendingAmount: dto.pendingAmount ?? sale.pendingAmount,
+  //     loyaltyPointsEarned: dto.loyaltyPointsEarned ?? sale.loyaltyPointsEarned,
+  //     loyaltyPointsRedeemed:
+  //       dto.loyaltyPointsRedeemed ?? sale.loyaltyPointsRedeemed,
+  //     notes: dto.notes ?? sale.notes,
+  //   });
 
-    await this.saleRepository.save(sale);
-    return this.findOne(id);
-  }
+  //   await this.saleRepository.save(sale);
+  //   return this.findOne(id);
+  // }
 
   async remove(id: string): Promise<{ message: string }> {
     const sale = await this.saleRepository.findOne({
@@ -428,60 +490,62 @@ export class SaleService {
 
     // Validar que no se pueda eliminar una venta con pagos
     if (sale.payments && sale.payments.length > 0) {
-      throw new ConflictException('No se puede eliminar una venta que tiene pagos asociados');
+      throw new ConflictException(
+        'No se puede eliminar una venta que tiene pagos asociados',
+      );
     }
 
     await this.saleRepository.softRemove(sale);
     return { message: 'Venta eliminada exitosamente' };
   }
 
-  async getSaleStats(): Promise<{
-    total: number;
-    pending: number;
-    confirmed: number;
-    cancelled: number;
-    totalAmount: number;
-    averageSale: number;
-    byType: Record<SaleType, number>;
-  }> {
-    const sales = await this.saleRepository.find({
-      where: { deletedAt: IsNull() },
-    });
+  // async getSaleStats(): Promise<{
+  //   total: number;
+  //   pending: number;
+  //   confirmed: number;
+  //   cancelled: number;
+  //   totalAmount: number;
+  //   averageSale: number;
+  //   byType: Record<SaleType, number>;
+  // }> {
+  //   const sales = await this.saleRepository.find({
+  //     where: { deletedAt: IsNull() },
+  //   });
 
-    const stats = {
-      total: sales.length,
-      pending: 0,
-      confirmed: 0,
-      cancelled: 0,
-      totalAmount: 0,
-      averageSale: 0,
-      byType: {
-        [SaleType.RETAIL]: 0,
-        [SaleType.WHOLESALE]: 0,
-      },
-    };
+  //   const stats = {
+  //     total: sales.length,
+  //     pending: 0,
+  //     confirmed: 0,
+  //     cancelled: 0,
+  //     totalAmount: 0,
+  //     averageSale: 0,
+  //     byType: {
+  //       [SaleType.RETAIL]: 0,
+  //       [SaleType.WHOLESALE]: 0,
+  //     },
+  //   };
 
-    sales.forEach(sale => {
-      stats.totalAmount += sale.total;
-      stats.byType[sale.type]++;
+  //   sales.forEach((sale) => {
+  //     stats.totalAmount += sale.total;
+  //     stats.byType[sale.type]++;
 
-      switch (sale.status) {
-        case SaleStatus.PENDING:
-          stats.pending++;
-          break;
-        case SaleStatus.CONFIRMED:
-          stats.confirmed++;
-          break;
-        case SaleStatus.CANCELLED:
-          stats.cancelled++;
-          break;
-      }
-    });
+  //     switch (sale.status) {
+  //       case SaleStatus.PENDING:
+  //         stats.pending++;
+  //         break;
+  //       case SaleStatus.CONFIRMED:
+  //         stats.confirmed++;
+  //         break;
+  //       case SaleStatus.CANCELLED:
+  //         stats.cancelled++;
+  //         break;
+  //     }
+  //   });
 
-    stats.averageSale = stats.total > 0 ? stats.totalAmount / stats.total : 0;
+  //   stats.averageSale = stats.total > 0 ? stats.totalAmount / stats.total : 0;
 
-    return stats;
-  }
+  //   return stats;
+  // }
 
   async getDailySales(date: string): Promise<SaleResponseDto[]> {
     const targetDate = new Date(date);
@@ -498,10 +562,41 @@ export class SaleService {
         startDate: targetDate,
         endDate: nextDate,
       })
-      .andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
+      .andWhere('sale.status != :cancelled', {
+        cancelled: SaleStatus.CANCELLED,
+      })
       .orderBy('sale.date', 'DESC')
       .getMany();
 
     return plainToInstance(SaleResponseDto, sales);
+  }
+
+  async generateNextInvoiceNumber(): Promise<{ nextNumber: string }> {
+    const currentYear = new Date().getFullYear();
+
+    const lastInvoice = await this.saleRepository.findOne({
+      where: {
+        invoiceNumber: Like(`ORD-${currentYear}-%`),
+      },
+      order: { invoiceNumber: 'DESC' },
+      withDeleted: false,
+    });
+
+    let sequence = 1;
+    if (lastInvoice && lastInvoice.invoiceNumber) {
+      const parts = lastInvoice.invoiceNumber.split('-');
+      if (parts.length === 3) {
+        const lastSequence = parseInt(parts[2]);
+        if (!isNaN(lastSequence)) {
+          sequence = lastSequence + 1;
+        }
+      }
+    }
+
+    const nextNumber = `ORD-${currentYear}-${sequence.toString().padStart(4, '0')}`;
+
+    this.saleGateway.broadcastNextInvoiceNumber(nextNumber);
+
+    return { nextNumber };
   }
 }

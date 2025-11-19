@@ -1,6 +1,7 @@
 import { Entity, Column, OneToMany } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Inventory, InventoryMovement } from '.';
+import { User } from 'src/auth/entities';
 
 @Entity('branches')
 export class Branch extends BaseEntity {
@@ -15,6 +16,9 @@ export class Branch extends BaseEntity {
 
   @Column({ type: 'text', nullable: true })
   email?: string;
+
+  @OneToMany(() => User, (user) => user.branch)
+  users: User[];
 
   @OneToMany(() => Inventory, (inventory) => inventory.branch)
   inventories: Inventory[];

@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Branch, Inventory, Product } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -27,13 +34,17 @@ export class ProductService {
     private readonly inventoryService: InventoryService,
   ) {}
 
-  async createWithInventory(dto: CreateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
+  async createWithInventory(
+    dto: CreateProductDto,
+    image?: Express.Multer.File,
+  ): Promise<ProductResponseDto> {
     // Verificar si el SKU ya existe
     const existingSku = await this.productRepository.findOne({
       where: { sku: dto.sku },
       withDeleted: false,
     });
-    if (existingSku) throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
+    if (existingSku)
+      throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
 
     // Verificar si el código de barras ya existe (si se proporciona)
     if (dto.barcode) {
@@ -42,7 +53,10 @@ export class ProductService {
         withDeleted: false,
       });
 
-      if (existingBarcode) throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
+      if (existingBarcode)
+        throw new ConflictException(
+          `El código de barras '${dto.barcode}' ya está en uso`,
+        );
     }
 
     let imageUrl: string | undefined;
@@ -54,14 +68,20 @@ export class ProductService {
     let category: any = null;
     let unit: any = null;
     if (dto.categoryId) {
-      category = await this.categoryService.findOne(dto.categoryId).catch(() => {
-        throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
-      });
+      category = await this.categoryService
+        .findOne(dto.categoryId)
+        .catch(() => {
+          throw new BadRequestException(
+            `La categoría con ID ${dto.categoryId} no existe`,
+          );
+        });
     }
     if (dto.unitId) {
       unit = await this.unitService.findOne(dto.unitId).catch(() => {
-        throw new BadRequestException(`La unidad con ID ${dto.unitId} no existe`);
-      })
+        throw new BadRequestException(
+          `La unidad con ID ${dto.unitId} no existe`,
+        );
+      });
     }
 
     const product = this.productRepository.create({
@@ -86,7 +106,10 @@ export class ProductService {
           where: { id: stockItem.branchId },
           withDeleted: false,
         });
-        if (!branch) throw new NotFoundException(`Sucursal con ID ${stockItem.branchId} no encontrada`);
+        if (!branch)
+          throw new NotFoundException(
+            `Sucursal con ID ${stockItem.branchId} no encontrada`,
+          );
 
         const inventory = this.inventoryRepository.create({
           product: savedProduct,
@@ -100,17 +123,19 @@ export class ProductService {
       }
     }
 
-    return plainToInstance(ProductResponseDto, savedProduct, { excludeExtraneousValues: true });
+    return plainToInstance(ProductResponseDto, savedProduct, {
+      excludeExtraneousValues: true,
+    });
   }
 
   async findAll(branchId?: string): Promise<ProductResponseDto[]> {
     const query = this.productRepository
-    .createQueryBuilder('product')
-    .leftJoinAndSelect('product.category', 'category')
-    .leftJoinAndSelect('product.unit', 'unit')
-    .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
-    .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id')
-    .where('product.deletedAt IS NULL');
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.category', 'category')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
+      .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id')
+      .where('product.deletedAt IS NULL');
 
     if (branchId) {
       query.andWhere('inventory.branch_id = :branchId', { branchId });
@@ -181,13 +206,19 @@ export class ProductService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Producto con código de barras ${barcode} no encontrado`);
+      throw new NotFoundException(
+        `Producto con código de barras ${barcode} no encontrado`,
+      );
     }
 
     return plainToInstance(ProductResponseDto, product);
   }
 
-  async update(id: string, dto: UpdateProductDto, imageFile?: any): Promise<ProductResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateProductDto,
+    imageFile?: any,
+  ): Promise<ProductResponseDto> {
     const product = await this.productRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['category', 'unit', 'category.defaultUnit'],
@@ -215,17 +246,29 @@ export class ProductService {
       });
 
       if (existingBarcode) {
-        throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
+        throw new ConflictException(
+          `El código de barras '${dto.barcode}' ya está en uso`,
+        );
       }
     }
 
     // Validar que el precio sea mayor o igual al costo
-    if (dto.price !== undefined && dto.cost !== undefined && dto.price < dto.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
+    if (
+      dto.price !== undefined &&
+      dto.cost !== undefined &&
+      dto.price < dto.cost
+    ) {
+      throw new BadRequestException(
+        'El precio debe ser mayor o igual al costo',
+      );
     } else if (dto.price !== undefined && dto.price < product.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
+      throw new BadRequestException(
+        'El precio debe ser mayor o igual al costo',
+      );
     } else if (dto.cost !== undefined && product.price < dto.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
+      throw new BadRequestException(
+        'El precio debe ser mayor o igual al costo',
+      );
     }
 
     // MANEJO DE IMAGEN - NUEVO
@@ -235,7 +278,7 @@ export class ProductService {
       if (product.imageUrl) {
         await this.fileService.deleteProductImage(product.imageUrl);
       }
-      
+
       // Guardar nueva imagen
       imageUrl = await this.fileService.saveProductImage(imageFile);
     }
@@ -249,7 +292,9 @@ export class ProductService {
         try {
           category = await this.categoryService.findOne(dto.categoryId);
         } catch (error) {
-          throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
+          throw new BadRequestException(
+            `La categoría con ID ${dto.categoryId} no existe`,
+          );
         }
       }
     }
@@ -263,7 +308,9 @@ export class ProductService {
         try {
           unit = await this.unitService.findOne(dto.unitId);
         } catch (error) {
-          throw new BadRequestException(`La unidad con ID ${dto.unitId} no existe`);
+          throw new BadRequestException(
+            `La unidad con ID ${dto.unitId} no existe`,
+          );
         }
       }
     }
@@ -364,7 +411,7 @@ export class ProductService {
     // Actualizar solo la imagen
     product.imageUrl = imageUrl;
     const updatedProduct = await this.productRepository.save(product);
-    
+
     return plainToInstance(ProductResponseDto, updatedProduct);
   }
 }
