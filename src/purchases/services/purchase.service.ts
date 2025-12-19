@@ -1,12 +1,28 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Purchase, PurchaseDetail, PurchaseStatus } from '../entities';
 import { DataSource, IsNull, Like, Repository } from 'typeorm';
 import { SupplierService } from '.';
-import { InventoryMovementService, ProductService } from 'src/logistics/services';
-import { CreatePurchaseDto, PurchaseResponseDto, UpdatePurchaseDto } from '../dto';
+import {
+  InventoryMovementService,
+  ProductService,
+} from 'src/logistics/services';
+import {
+  CreatePurchaseDto,
+  PurchaseResponseDto,
+  UpdatePurchaseDto,
+} from '../dto';
 import { plainToInstance } from 'class-transformer';
-import { MovementStatus, MovementType } from 'src/logistics/entities/inventory-movement.entity';
+import {
+  MovementStatus,
+  MovementType,
+  MovementConcept,
+} from 'src/logistics/entities/inventory-movement.entity';
 import { PurchaseGateway } from '../gateway/purchase.gateway';
 
 @Injectable()
@@ -38,7 +54,9 @@ export class PurchaseService {
     try {
       supplier = await this.supplierService.findOne(dto.supplierId);
     } catch (error) {
-      throw new BadRequestException(`El proveedor con ID ${dto.supplierId} no existe`);
+      throw new BadRequestException(
+        `El proveedor con ID ${dto.supplierId} no existe`,
+      );
     }
 
     // Validar detalles de la compra
@@ -77,14 +95,17 @@ export class PurchaseService {
         try {
           product = await this.productService.findOne(detailDto.productId);
         } catch (error) {
-          throw new BadRequestException(`El producto con ID ${detailDto.productId} no existe`);
+          throw new BadRequestException(
+            `El producto con ID ${detailDto.productId} no existe`,
+          );
         }
 
         // Calcular montos del detalle
         const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
-        const lineDiscount = lineSubtotal * (detailDto.discount || 0) / 100;
+        const lineDiscount = (lineSubtotal * (detailDto.discount || 0)) / 100;
         const subtotalAfterDiscount = lineSubtotal - lineDiscount;
-        const lineTax = subtotalAfterDiscount * (detailDto.taxPercentage || 0) / 100;
+        const lineTax =
+          (subtotalAfterDiscount * (detailDto.taxPercentage || 0)) / 100;
         const lineTotal = subtotalAfterDiscount + lineTax;
 
         const detail = queryRunner.manager.create(PurchaseDetail, {
@@ -107,7 +128,7 @@ export class PurchaseService {
       }
 
       const total = subtotal - discountAmount + taxAmount;
-      
+
       await queryRunner.manager.update(Purchase, savedPurchase.id, {
         subtotal,
         discountAmount,
@@ -137,7 +158,13 @@ export class PurchaseService {
   async findAll(): Promise<PurchaseResponseDto[]> {
     const purchases = await this.purchaseRepository.find({
       where: { deletedAt: IsNull() },
-      relations: ['supplier', 'details', 'details.product', 'payments', 'payments.paymentMethod'],
+      relations: [
+        'supplier',
+        'details',
+        'details.product',
+        'payments',
+        'payments.paymentMethod',
+      ],
       order: { date: 'DESC', createdAt: 'DESC' },
     });
     return plainToInstance(PurchaseResponseDto, purchases);
@@ -146,7 +173,13 @@ export class PurchaseService {
   async findOne(id: string): Promise<PurchaseResponseDto> {
     const purchase = await this.purchaseRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['supplier', 'details', 'details.product', 'payments', 'payments.paymentMethod'],
+      relations: [
+        'supplier',
+        'details',
+        'details.product',
+        'payments',
+        'payments.paymentMethod',
+      ],
     });
 
     if (!purchase) {
@@ -158,9 +191,9 @@ export class PurchaseService {
 
   async findBySupplier(supplierId: string): Promise<PurchaseResponseDto[]> {
     const purchases = await this.purchaseRepository.find({
-      where: { 
+      where: {
         supplier: { id: supplierId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['supplier', 'details', 'details.product', 'payments'],
       order: { date: 'DESC' },
@@ -177,7 +210,10 @@ export class PurchaseService {
     return plainToInstance(PurchaseResponseDto, purchases);
   }
 
-  async update(id: string, dto: UpdatePurchaseDto): Promise<PurchaseResponseDto> {
+  async update(
+    id: string,
+    dto: UpdatePurchaseDto,
+  ): Promise<PurchaseResponseDto> {
     const purchase = await this.purchaseRepository.findOne({
       where: { id, deletedAt: IsNull() },
     });
@@ -187,8 +223,13 @@ export class PurchaseService {
     }
 
     // Validar que no se pueda modificar una compra pagada o cancelada
-    if (purchase.status === PurchaseStatus.PAID || purchase.status === PurchaseStatus.CANCELLED) {
-      throw new BadRequestException('No se puede modificar una compra pagada o cancelada');
+    if (
+      purchase.status === PurchaseStatus.PAID ||
+      purchase.status === PurchaseStatus.CANCELLED
+    ) {
+      throw new BadRequestException(
+        'No se puede modificar una compra pagada o cancelada',
+      );
     }
 
     // Verificar si el nuevo número de factura ya existe
@@ -198,7 +239,9 @@ export class PurchaseService {
       });
 
       if (existingInvoice) {
-        throw new ConflictException(`La factura ${dto.invoiceNumber} ya existe`);
+        throw new ConflictException(
+          `La factura ${dto.invoiceNumber} ya existe`,
+        );
       }
     }
 
@@ -218,7 +261,10 @@ export class PurchaseService {
 
     // Actualizar estado automáticamente según el monto pagado
     if (dto.paidAmount !== undefined) {
-      purchase.status = this.calculatePurchaseStatus(purchase.total, dto.paidAmount);
+      purchase.status = this.calculatePurchaseStatus(
+        purchase.total,
+        dto.paidAmount,
+      );
     }
 
     await this.purchaseRepository.save(purchase);
@@ -237,7 +283,9 @@ export class PurchaseService {
 
     // Validar que no se pueda eliminar una compra con pagos
     if (purchase.payments && purchase.payments.length > 0) {
-      throw new ConflictException('No se puede eliminar una compra que tiene pagos asociados');
+      throw new ConflictException(
+        'No se puede eliminar una compra que tiene pagos asociados',
+      );
     }
 
     await this.purchaseRepository.softRemove(purchase);
@@ -263,7 +311,10 @@ export class PurchaseService {
     return this.findOne(id);
   }
 
-  async receivePurchase(id: string, branchId: string): Promise<PurchaseResponseDto> {
+  async receivePurchase(
+    id: string,
+    branchId: string,
+  ): Promise<PurchaseResponseDto> {
     const purchase = await this.purchaseRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['details', 'details.product'],
@@ -284,16 +335,23 @@ export class PurchaseService {
     try {
       // Crear movimientos de inventario para cada producto
       for (const detail of purchase.details) {
-        await this.inventoryMovementService.create({
-          productId: detail.product.id,
-          branchId: branchId,
-          quantity: detail.quantity,
-          type: MovementType.IN,
-          notes: `Recepción de compra ${purchase.invoiceNumber}`,
-          unitCost: detail.unitPrice,
-          totalCost: detail.quantity * detail.unitPrice,
-          status: MovementStatus.COMPLETED, // Se recibe inmediatamente
-        });
+        await this.inventoryMovementService.create(
+          {
+            productId: detail.product.id,
+            branchId: branchId,
+            quantity: detail.quantity,
+            type: MovementType.IN,
+            notes: `Recepción de compra ${purchase.invoiceNumber}`,
+            unitCost: detail.unitPrice,
+            totalCost: detail.quantity * detail.unitPrice,
+            status: MovementStatus.COMPLETED, // Se recibe inmediatamente
+            referenceId: purchase.id,
+            referenceNumber: purchase.invoiceNumber,
+            concept: MovementConcept.PURCHASE,
+          },
+          undefined,
+          true,
+        );
       }
 
       await queryRunner.commitTransaction();
@@ -329,9 +387,10 @@ export class PurchaseService {
       pendingAmount: 0,
     };
 
-    purchases.forEach(purchase => {
+    purchases.forEach((purchase) => {
       stats.totalAmount = Number(stats.totalAmount) + Number(purchase.total);
-      stats.pendingAmount = Number(stats.pendingAmount) + Number(purchase.pendingAmount);
+      stats.pendingAmount =
+        Number(stats.pendingAmount) + Number(purchase.pendingAmount);
 
       switch (purchase.status) {
         case PurchaseStatus.PENDING:
@@ -352,7 +411,10 @@ export class PurchaseService {
     return stats;
   }
 
-  private calculatePurchaseStatus(total: number, paidAmount: number): PurchaseStatus {
+  private calculatePurchaseStatus(
+    total: number,
+    paidAmount: number,
+  ): PurchaseStatus {
     if (paidAmount === 0) return PurchaseStatus.PENDING;
     if (paidAmount < total) return PurchaseStatus.PARTIALLY_PAID;
     if (paidAmount >= total) return PurchaseStatus.PAID;
@@ -364,10 +426,10 @@ export class PurchaseService {
 
     const lastInvoice = await this.purchaseRepository.findOne({
       where: {
-        invoiceNumber: Like(`ORD-${currentYear}-%`)
+        invoiceNumber: Like(`ORD-${currentYear}-%`),
       },
       order: { invoiceNumber: 'DESC' },
-      withDeleted: false
+      withDeleted: false,
     });
 
     let sequence = 1;
@@ -383,8 +445,8 @@ export class PurchaseService {
 
     const nextNumber = `ORD-${currentYear}-${sequence.toString().padStart(4, '0')}`;
 
-    this.purchaseGateway.broadcastNextInvoiceNumber(nextNumber)
-    
+    this.purchaseGateway.broadcastNextInvoiceNumber(nextNumber);
+
     return { nextNumber };
   }
 }

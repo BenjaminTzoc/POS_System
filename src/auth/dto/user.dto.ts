@@ -1,19 +1,10 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  IsEmail,
-  IsBoolean,
-  IsArray,
-  ValidateNested,
-  MinLength,
-  MaxLength,
-  IsUUID,
-} from 'class-validator';
+//prettier-ignore
+import { IsString, IsOptional, IsNotEmpty, IsEmail, IsBoolean, IsArray, MinLength, MaxLength, IsUUID } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { PermissionResponseDto, RoleResponseDto } from '.';
 import { BaseEntity } from 'src/common/entities';
 import { BranchResponseDto } from 'src/logistics/dto';
+import { PartialType } from '@nestjs/mapped-types';
 
 export class CreateUserDto {
   @IsNotEmpty()
@@ -31,13 +22,13 @@ export class CreateUserDto {
   @MinLength(6)
   password: string;
 
-  @IsNotEmpty()
-  @IsString()
-  roleId: string;
+  @IsArray()
+  @IsUUID('all', { each: true })
+  roleIds: string[];
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsUUID()
-  branchId: string;
+  branchId?: string;
 
   @IsOptional()
   @IsArray()
@@ -45,38 +36,10 @@ export class CreateUserDto {
   permissionIds?: string[];
 }
 
-export class UpdateUserDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  name?: string;
-
-  @IsOptional()
-  @IsEmail()
-  @MaxLength(150)
-  email?: string;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(6)
-  password?: string;
-
-  @IsOptional()
-  @IsString()
-  roleId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  branchId?: string;
-
+export class UpdateUserDto extends PartialType(CreateUserDto) {
   @IsOptional()
   @IsBoolean()
   emailVerified?: boolean;
-
-  @IsOptional()
-  @IsArray()
-  @IsUUID('4', { each: true })
-  permissionIds?: string[];
 }
 
 export class UserResponseDto extends BaseEntity {
@@ -94,7 +57,7 @@ export class UserResponseDto extends BaseEntity {
 
   @Expose()
   @Type(() => RoleResponseDto)
-  role: RoleResponseDto;
+  roles: RoleResponseDto[];
 
   @Expose()
   @Type(() => BranchResponseDto) // 🔥 Nuevo campo

@@ -28,13 +28,17 @@ export class User extends BaseEntity {
   @Column({ name: 'email_verified', default: false })
   emailVerified: boolean;
 
-  @ManyToOne(() => Role, { eager: true, nullable: false })
-  @JoinColumn({ name: 'role_id' })
-  role: Role;
+  @ManyToMany(() => Role, { eager: true })
+  @JoinTable({
+    name: 'users_roles',
+    joinColumn: { name: 'user_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'role_id', referencedColumnName: 'id' },
+  })
+  roles: Role[];
 
   @ManyToOne(() => Branch, { eager: true, nullable: true })
   @JoinColumn({ name: 'branch_id' })
-  branch: Branch;
+  branch: Branch | null;
 
   @ManyToMany(() => Permission, { eager: true })
   @JoinTable({

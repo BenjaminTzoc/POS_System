@@ -1,8 +1,16 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaymentMethod } from '../entities';
 import { IsNull, Repository } from 'typeorm';
-import { CreatePaymentMethodDto, PaymentMethodResponseDto, UpdatePaymentMethodDto } from '../dto';
+import {
+  CreatePaymentMethodDto,
+  PaymentMethodResponseDto,
+  UpdatePaymentMethodDto,
+} from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -34,18 +42,19 @@ export class PaymentMethodService {
     }
 
     const paymentMethod = this.paymentMethodRepository.create(dto);
-    const savedPaymentMethod = await this.paymentMethodRepository.save(paymentMethod);
+    const savedPaymentMethod =
+      await this.paymentMethodRepository.save(paymentMethod);
     return plainToInstance(PaymentMethodResponseDto, savedPaymentMethod);
   }
 
   async findAll(): Promise<PaymentMethodResponseDto[]> {
     const paymentMethods = await this.paymentMethodRepository.find({
       where: { deletedAt: IsNull() },
-      order: { name: 'ASC' },
+      order: { createdAt: 'ASC' },
     });
     return plainToInstance(PaymentMethodResponseDto, paymentMethods);
   }
-  
+
   async findOne(id: string): Promise<PaymentMethodResponseDto> {
     const paymentMethod = await this.paymentMethodRepository.findOne({
       where: { id, deletedAt: IsNull() },
@@ -64,13 +73,18 @@ export class PaymentMethodService {
     });
 
     if (!paymentMethod) {
-      throw new NotFoundException(`Método de pago con código ${code} no encontrado`);
+      throw new NotFoundException(
+        `Método de pago con código ${code} no encontrado`,
+      );
     }
 
     return plainToInstance(PaymentMethodResponseDto, paymentMethod);
   }
 
-  async update(id: string, dto: UpdatePaymentMethodDto): Promise<PaymentMethodResponseDto> {
+  async update(
+    id: string,
+    dto: UpdatePaymentMethodDto,
+  ): Promise<PaymentMethodResponseDto> {
     const paymentMethod = await this.paymentMethodRepository.findOne({
       where: { id, deletedAt: IsNull() },
     });
@@ -86,7 +100,9 @@ export class PaymentMethodService {
       });
 
       if (existingName) {
-        throw new ConflictException(`El método de pago '${dto.name}' ya existe`);
+        throw new ConflictException(
+          `El método de pago '${dto.name}' ya existe`,
+        );
       }
     }
 
@@ -102,7 +118,8 @@ export class PaymentMethodService {
     }
 
     Object.assign(paymentMethod, dto);
-    const updatedPaymentMethod = await this.paymentMethodRepository.save(paymentMethod);
+    const updatedPaymentMethod =
+      await this.paymentMethodRepository.save(paymentMethod);
     return plainToInstance(PaymentMethodResponseDto, updatedPaymentMethod);
   }
 
@@ -138,11 +155,14 @@ export class PaymentMethodService {
     }
 
     if (!paymentMethod.deletedAt) {
-      throw new ConflictException(`El método de pago con ID ${id} no está eliminado`);
+      throw new ConflictException(
+        `El método de pago con ID ${id} no está eliminado`,
+      );
     }
 
     paymentMethod.deletedAt = null;
-    const restoredPaymentMethod = await this.paymentMethodRepository.save(paymentMethod);
+    const restoredPaymentMethod =
+      await this.paymentMethodRepository.save(paymentMethod);
     return plainToInstance(PaymentMethodResponseDto, restoredPaymentMethod);
   }
 }

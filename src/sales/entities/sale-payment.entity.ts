@@ -6,7 +6,7 @@ import { PaymentMethod } from 'src/purchases/entities';
 export enum PaymentStatus {
   PENDING = 'pending',
   COMPLETED = 'completed',
-  CANCELLED = 'cancelled'
+  CANCELLED = 'cancelled',
 }
 
 @Entity('sale_payments')
@@ -18,6 +18,15 @@ export class SalePayment extends BaseEntity {
   @ManyToOne(() => PaymentMethod, { eager: true, nullable: false })
   @JoinColumn({ name: 'payment_method_id' })
   paymentMethod: PaymentMethod;
+
+  @Column({ type: 'text', nullable: true })
+  externalTransactionId?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  paymentProcessor?: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  paymentLinkId?: string | null;
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
@@ -31,7 +40,11 @@ export class SalePayment extends BaseEntity {
   @Column({ name: 'bank_account', type: 'text', nullable: true })
   bankAccount: string | null;
 
-  @Column({ type: 'enum', enum: PaymentStatus, default: PaymentStatus.COMPLETED })
+  @Column({
+    type: 'enum',
+    enum: PaymentStatus,
+    default: PaymentStatus.COMPLETED,
+  })
   status: PaymentStatus;
 
   @Column({ type: 'text', nullable: true })

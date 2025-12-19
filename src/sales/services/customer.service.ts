@@ -1,9 +1,18 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Customer } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { CustomerCategoryService } from '.';
-import { CreateCustomerDto, CustomerResponseDto, UpdateCustomerDto } from '../dto';
+import {
+  CreateCustomerDto,
+  CustomerResponseDto,
+  UpdateCustomerDto,
+} from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -32,7 +41,9 @@ export class CustomerService {
       try {
         category = await this.customerCategoryService.findOne(dto.categoryId);
       } catch (error) {
-        throw new BadRequestException(`La categoría de cliente con ID ${dto.categoryId} no existe`);
+        throw new BadRequestException(
+          `La categoría de cliente con ID ${dto.categoryId} no existe`,
+        );
       }
     }
 
@@ -89,9 +100,9 @@ export class CustomerService {
 
   async findByCategory(categoryId: string): Promise<CustomerResponseDto[]> {
     const customers = await this.customerRepository.find({
-      where: { 
+      where: {
         category: { id: categoryId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['category'],
       order: { name: 'ASC' },
@@ -99,7 +110,10 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customers);
   }
 
-  async update(id: string, dto: UpdateCustomerDto): Promise<CustomerResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateCustomerDto,
+  ): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['category'],
@@ -129,7 +143,9 @@ export class CustomerService {
         try {
           category = await this.customerCategoryService.findOne(dto.categoryId);
         } catch (error) {
-          throw new BadRequestException(`La categoría de cliente con ID ${dto.categoryId} no existe`);
+          throw new BadRequestException(
+            `La categoría de cliente con ID ${dto.categoryId} no existe`,
+          );
         }
       }
     }
@@ -206,7 +222,10 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customers);
   }
 
-  async addLoyaltyPoints(customerId: string, points: number): Promise<CustomerResponseDto> {
+  async addLoyaltyPoints(
+    customerId: string,
+    points: number,
+  ): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id: customerId, deletedAt: IsNull() },
     });
@@ -216,7 +235,9 @@ export class CustomerService {
     }
 
     if (points <= 0) {
-      throw new BadRequestException('Los puntos de lealtad deben ser mayores a 0');
+      throw new BadRequestException(
+        'Los puntos de lealtad deben ser mayores a 0',
+      );
     }
 
     customer.loyaltyPoints += points;
@@ -228,7 +249,10 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, updatedCustomer);
   }
 
-  async redeemLoyaltyPoints(customerId: string, points: number): Promise<CustomerResponseDto> {
+  async redeemLoyaltyPoints(
+    customerId: string,
+    points: number,
+  ): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id: customerId, deletedAt: IsNull() },
     });
@@ -238,11 +262,15 @@ export class CustomerService {
     }
 
     if (points <= 0) {
-      throw new BadRequestException('Los puntos a redimir deben ser mayores a 0');
+      throw new BadRequestException(
+        'Los puntos a redimir deben ser mayores a 0',
+      );
     }
 
     if (customer.loyaltyPoints < points) {
-      throw new BadRequestException('El cliente no tiene suficientes puntos para redimir');
+      throw new BadRequestException(
+        'El cliente no tiene suficientes puntos para redimir',
+      );
     }
 
     customer.loyaltyPoints -= points;
@@ -259,7 +287,7 @@ export class CustomerService {
       throw new NotFoundException(`Cliente con ID ${customerId} no encontrado`);
     }
 
-    customer.totalPurchases += amount;
+    customer.totalPurchases = Number(customer.totalPurchases) + Number(amount);
     customer.lastPurchaseDate = new Date();
 
     await this.customerRepository.save(customer);
@@ -287,9 +315,9 @@ export class CustomerService {
       totalLoyaltyPoints: 0,
     };
 
-    customers.forEach(customer => {
+    customers.forEach((customer) => {
       stats.totalLoyaltyPoints += customer.loyaltyPoints;
-      
+
       if (customer.category) {
         stats.withCategory++;
       } else {
@@ -313,9 +341,15 @@ export class CustomerService {
     if (!customer) return;
 
     // Encontrar la categoría apropiada basada en el monto total de compras
-    const appropriateCategory = await this.customerCategoryService.findCategoryByPurchaseAmount(customer.totalPurchases);
+    const appropriateCategory =
+      await this.customerCategoryService.findCategoryByPurchaseAmount(
+        customer.totalPurchases,
+      );
 
-    if (appropriateCategory && (!customer.category || customer.category.id !== appropriateCategory.id)) {
+    if (
+      appropriateCategory &&
+      (!customer.category || customer.category.id !== appropriateCategory.id)
+    ) {
       customer.category = { id: appropriateCategory.id } as any;
       await this.customerRepository.save(customer);
     }

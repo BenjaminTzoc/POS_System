@@ -15,7 +15,7 @@ import { SalesModule } from './sales/sales.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [jwtConfig]
+      load: [jwtConfig],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

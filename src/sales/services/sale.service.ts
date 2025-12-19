@@ -15,7 +15,13 @@ import {
 } from 'src/logistics/services';
 import { CreateSaleDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
-import { MovementStatus, MovementType } from 'src/logistics/entities';
+import {
+  Branch,
+  Inventory,
+  MovementStatus,
+  MovementType,
+  MovementConcept,
+} from 'src/logistics/entities';
 import { SaleGateway } from '../gateway/sale.gateway';
 import { SaleDiscount } from '../entities/sale-discount.entity';
 
@@ -24,6 +30,8 @@ export class SaleService {
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
+    @InjectRepository(Branch)
+    private readonly branchRepository: Repository<Branch>,
     @InjectRepository(SaleDetail)
     private readonly saleDetailRepository: Repository<SaleDetail>,
 
@@ -69,9 +77,62 @@ export class SaleService {
       }
     }
 
-    const branch = await this.branchService.findOne(dto.branchId);
+    const branch = await this.branchRepository.findOne({
+      where: { id: dto.branchId, deletedAt: IsNull() },
+    });
+
+    if (!branch) {
+      throw new BadRequestException('Sucursal no válida.');
+    }
+
     if (!dto.details?.length)
       throw new BadRequestException('La venta debe tener al menos un detalle');
+
+    const stockErrors: string[] = [];
+
+    for (const detailDto of dto.details) {
+      const stockQuery = await this.dataSource
+        .createQueryBuilder()
+        .select([
+          'product.id',
+          'product.name',
+          'COALESCE(SUM(inventory.stock), 0) AS current_stock',
+        ])
+        .from('products', 'product')
+        .leftJoin(
+          'inventories',
+          'inventory',
+          'inventory.product_id = product.id AND inventory.branch_id = :branchId',
+          { branchId: dto.branchId },
+        )
+        .where('product.id = :productId', { productId: detailDto.productId })
+        .andWhere('product.deletedAt IS NULL')
+        .groupBy('product.id')
+        .getRawOne();
+
+      if (!stockQuery) {
+        stockErrors.push(
+          `Producto con ID ${detailDto.productId} no encontrado`,
+        );
+        continue;
+      }
+
+      const currentStock = Number(stockQuery.current_stock);
+      const productName = stockQuery.product_name;
+
+      if (currentStock < detailDto.quantity) {
+        stockErrors.push(
+          `Producto "${productName}" - Stock insuficiente: solicitado ${detailDto.quantity}, disponible ${currentStock}`,
+        );
+      }
+    }
+
+    if (stockErrors.length > 0) {
+      throw new BadRequestException({
+        message: 'Error de stock en los productos',
+        errors: stockErrors,
+      });
+    }
 
     let discountCode: any = null;
     let discountCodeAmount: number = 0;
@@ -116,6 +177,7 @@ export class SaleService {
         guestCustomer: dto.guestCustomer ?? undefined,
         branch: { id: dto.branchId },
         discountCode: dto.discountCodeId ? { id: dto.discountCodeId } : null,
+        applyTax: dto.applyTax ?? true,
 
         // Se actualizan después
         subtotal: 0,
@@ -139,8 +201,9 @@ export class SaleService {
         const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
         const lineDiscount = (lineSubtotal * (detailDto.discount || 0)) / 100;
         const lineAfterDiscount = lineSubtotal - lineDiscount;
-        const lineTax =
-          (lineAfterDiscount * (detailDto.taxPercentage || 0)) / 100;
+        const lineTax = sale.applyTax
+          ? (lineAfterDiscount * (detailDto.taxPercentage ?? 12)) / 100
+          : 0;
         const lineTotal = lineAfterDiscount + lineTax;
 
         const detail = qr.manager.create(SaleDetail, {
@@ -150,7 +213,7 @@ export class SaleService {
           unitPrice: detailDto.unitPrice,
           discount: detailDto.discount || 0,
           discountAmount: lineDiscount,
-          taxPercentage: detailDto.taxPercentage || 0,
+          taxPercentage: sale.applyTax ? (detailDto.taxPercentage ?? 12) : 0,
           taxAmount: lineTax,
           lineTotal,
         });
@@ -190,14 +253,22 @@ export class SaleService {
       }
 
       // ---------------- TOTAL FINAL ----------------
-      const totalDiscounts =
-        lineDiscounts + manualDiscountsAmount + discountCodeAmount;
+      const globalDiscounts = manualDiscountsAmount + discountCodeAmount;
+      const totalDiscounts = lineDiscounts + globalDiscounts;
 
-      const total = subtotal - totalDiscounts + taxAmount;
+      // Escenario 1: El impuesto se calcula sobre el valor NETO (Subtotal - Descuentos)
+      // Ajustamos el taxAmount acumulado de las líneas por el factor de descuento global
+      const taxableBase = subtotal - lineDiscounts;
+      const finalTaxAmount =
+        taxableBase > 0
+          ? taxAmount * ((taxableBase - globalDiscounts) / taxableBase)
+          : 0;
+
+      const total = taxableBase - globalDiscounts + finalTaxAmount;
 
       await qr.manager.update(Sale, savedSale.id, {
         subtotal,
-        taxAmount,
+        taxAmount: finalTaxAmount,
         discountAmount: totalDiscounts,
         total,
         pendingAmount: total,
@@ -221,13 +292,19 @@ export class SaleService {
     }
   }
 
-  async findAll(): Promise<SaleResponseDto[]> {
+  async findAll(branchId?: string): Promise<SaleResponseDto[]> {
+    const where: any = { deletedAt: IsNull() };
+    if (branchId) {
+      where.branch = { id: branchId };
+    }
+
     const sales = await this.saleRepository.find({
-      where: { deletedAt: IsNull() },
+      where,
       relations: [
         'customer',
         'customer.category',
         'discountCode',
+        'branch',
         'details',
         'details.product',
         'payments',
@@ -245,15 +322,34 @@ export class SaleService {
         'customer',
         'customer.category',
         'discountCode',
+        'branch',
         'details',
         'details.product',
+        'details.product.inventories',
+        'details.product.inventories.branch',
         'payments',
         'payments.paymentMethod',
+        'discounts',
       ],
+      order: {
+        payments: {
+          createdAt: 'DESC',
+        },
+      },
     });
 
     if (!sale) {
       throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    // Calcular el stock para cada producto en la sucursal de la venta
+    if (sale.details) {
+      sale.details.forEach((detail) => {
+        const inventory = detail.product.inventories?.find(
+          (inv) => inv.branch?.id === sale.branch?.id,
+        );
+        (detail.product as any).stock = inventory ? Number(inventory.stock) : 0;
+      });
     }
 
     return plainToInstance(SaleResponseDto, sale);
@@ -292,10 +388,14 @@ export class SaleService {
     return plainToInstance(SaleResponseDto, sales);
   }
 
-  async confirmSale(id: string, branchId: string): Promise<SaleResponseDto> {
+  async confirmSale(
+    id: string,
+    branchId?: string,
+    userId?: string,
+  ): Promise<SaleResponseDto> {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['details', 'details.product', 'customer'],
+      relations: ['details', 'details.product', 'customer', 'branch'],
     });
 
     if (!sale) {
@@ -315,16 +415,23 @@ export class SaleService {
     try {
       // Crear movimientos de inventario para cada producto
       for (const detail of sale.details) {
-        await this.inventoryMovementService.create({
-          productId: detail.product.id,
-          branchId: branchId,
-          quantity: detail.quantity,
-          type: MovementType.OUT,
-          notes: `Venta ${sale.invoiceNumber}`,
-          unitCost: detail.product.cost,
-          totalCost: detail.quantity * detail.product.cost,
-          status: MovementStatus.COMPLETED,
-        });
+        await this.inventoryMovementService.create(
+          {
+            productId: detail.product.id,
+            branchId: branchId || sale.branch.id,
+            quantity: detail.quantity,
+            type: MovementType.OUT,
+            notes: `Venta ${sale.invoiceNumber}`,
+            unitCost: detail.product.cost,
+            totalCost: detail.quantity * detail.product.cost,
+            status: MovementStatus.COMPLETED,
+            referenceId: sale.id,
+            referenceNumber: sale.invoiceNumber,
+            concept: MovementConcept.SALE,
+          },
+          userId,
+          true,
+        );
       }
 
       // Actualizar estado de la venta
@@ -373,10 +480,40 @@ export class SaleService {
     }
   }
 
-  async cancelSale(id: string): Promise<SaleResponseDto> {
+  async deliverSale(id: string): Promise<SaleResponseDto> {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['customer', 'details'],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException('No se puede entregar una venta cancelada');
+    }
+
+    if (sale.status === SaleStatus.PENDING) {
+      throw new BadRequestException(
+        'Debe confirmar la venta antes de marcarla como entregada',
+      );
+    }
+
+    sale.status = SaleStatus.DELIVERED;
+    await this.saleRepository.save(sale);
+    return this.findOne(id);
+  }
+
+  async cancelSale(id: string, userId?: string): Promise<SaleResponseDto> {
+    const sale = await this.saleRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+      relations: [
+        'customer',
+        'details',
+        'details.product',
+        'branch',
+        'discountCode',
+      ],
     });
 
     if (!sale) {
@@ -392,24 +529,46 @@ export class SaleService {
     await queryRunner.startTransaction();
 
     try {
-      // Revertir puntos de lealtad si la venta estaba confirmada
-      // if (sale.status === SaleStatus.CONFIRMED && sale.customer) {
-      //   if (sale.loyaltyPointsEarned > 0) {
-      //     await this.customerService.redeemLoyaltyPoints(
-      //       sale.customer.id,
-      //       sale.loyaltyPointsEarned,
-      //     );
-      //   }
+      // Si la venta NO estaba pendiente, significa que ya afectó inventario y estadísticas
+      if (sale.status !== SaleStatus.PENDING) {
+        // 1. Revertir inventario (Crear movimientos de ENTRADA)
+        for (const detail of sale.details) {
+          await this.inventoryMovementService.create(
+            {
+              productId: detail.product.id,
+              branchId: sale.branch.id,
+              quantity: detail.quantity,
+              type: MovementType.IN,
+              notes: `Cancelación de Venta ${sale.invoiceNumber}`,
+              unitCost: detail.product.cost,
+              totalCost: detail.quantity * detail.product.cost,
+              status: MovementStatus.COMPLETED,
+              referenceId: sale.id,
+              referenceNumber: sale.invoiceNumber,
+              concept: MovementConcept.RETURN,
+            },
+            userId,
+            true,
+          );
+        }
 
-      //   if (sale.loyaltyPointsRedeemed > 0) {
-      //     await this.customerService.addLoyaltyPoints(
-      //       sale.customer.id,
-      //       sale.loyaltyPointsRedeemed,
-      //     );
-      //   }
-      // }
+        // 2. Revertir estadísticas de compra del cliente
+        if (sale.customer) {
+          await this.customerService.updatePurchaseStats(
+            sale.customer.id,
+            -sale.total, // Monto negativo para restar
+          );
+        }
 
-      // Cancelar la venta
+        // 3. Revertir contador de uso del código de descuento
+        if (sale.discountCode) {
+          await this.discountCodeService.revertDiscountCodeUsage(
+            sale.discountCode.code,
+          );
+        }
+      }
+
+      // 4. Cambiar estado a CANCELADO
       sale.status = SaleStatus.CANCELLED;
       await queryRunner.manager.save(sale);
 
@@ -423,60 +582,217 @@ export class SaleService {
     }
   }
 
-  // async update(id: string, dto: UpdateSaleDto): Promise<SaleResponseDto> {
-  //   const sale = await this.saleRepository.findOne({
-  //     where: { id, deletedAt: IsNull() },
-  //   });
+  async update(id: string, dto: UpdateSaleDto): Promise<SaleResponseDto> {
+    const sale = await this.saleRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+      relations: ['customer', 'branch', 'details', 'discounts'],
+    });
 
-  //   if (!sale) {
-  //     throw new NotFoundException(`Venta con ID ${id} no encontrada`);
-  //   }
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
 
-  //   // Validar que no se pueda modificar una venta confirmada o cancelada
-  //   if (
-  //     sale.status === SaleStatus.CONFIRMED ||
-  //     sale.status === SaleStatus.CANCELLED
-  //   ) {
-  //     throw new BadRequestException(
-  //       'No se puede modificar una venta confirmada o cancelada',
-  //     );
-  //   }
+    if (sale.status !== SaleStatus.PENDING) {
+      throw new BadRequestException(
+        'Solo se pueden editar ventas en estado PENDIENTE',
+      );
+    }
 
-  //   // Verificar si el nuevo número de factura ya existe
-  //   if (dto.invoiceNumber && dto.invoiceNumber !== sale.invoiceNumber) {
-  //     const existingInvoice = await this.saleRepository.findOne({
-  //       where: { invoiceNumber: dto.invoiceNumber, deletedAt: IsNull() },
-  //     });
+    // El estado NO se puede cambiar por aquí
+    // El branchId tampoco debería cambiarse si ya tiene movimientos (en este caso solo es cabecera)
 
-  //     if (existingInvoice) {
-  //       throw new ConflictException(
-  //         `La factura ${dto.invoiceNumber} ya existe`,
-  //       );
-  //     }
-  //   }
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
 
-  //   Object.assign(sale, {
-  //     invoiceNumber: dto.invoiceNumber ?? sale.invoiceNumber,
-  //     date: dto.date ? new Date(dto.date) : sale.date,
-  //     type: dto.type ?? sale.type,
-  //     status: dto.status ?? sale.status,
-  //     subtotal: dto.subtotal ?? sale.subtotal,
-  //     taxAmount: dto.taxAmount ?? sale.taxAmount,
-  //     discountAmount: dto.discountAmount ?? sale.discountAmount,
-  //     categoryDiscount: dto.categoryDiscount ?? sale.categoryDiscount,
-  //     codeDiscount: dto.codeDiscount ?? sale.codeDiscount,
-  //     total: dto.total ?? sale.total,
-  //     paidAmount: dto.paidAmount ?? sale.paidAmount,
-  //     pendingAmount: dto.pendingAmount ?? sale.pendingAmount,
-  //     loyaltyPointsEarned: dto.loyaltyPointsEarned ?? sale.loyaltyPointsEarned,
-  //     loyaltyPointsRedeemed:
-  //       dto.loyaltyPointsRedeemed ?? sale.loyaltyPointsRedeemed,
-  //     notes: dto.notes ?? sale.notes,
-  //   });
+    try {
+      // 1. Actualizar metadatos básicos
+      if (dto.invoiceNumber && dto.invoiceNumber !== sale.invoiceNumber) {
+        const existing = await this.saleRepository.findOne({
+          where: { invoiceNumber: dto.invoiceNumber, deletedAt: IsNull() },
+        });
+        if (existing)
+          throw new ConflictException(
+            `La factura ${dto.invoiceNumber} ya existe`,
+          );
+        sale.invoiceNumber = dto.invoiceNumber;
+      }
 
-  //   await this.saleRepository.save(sale);
-  //   return this.findOne(id);
-  // }
+      if (dto.date) sale.date = new Date(dto.date);
+      if (dto.dueDate !== undefined)
+        sale.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+      if (dto.notes !== undefined) sale.notes = dto.notes;
+      if (dto.applyTax !== undefined) sale.applyTax = dto.applyTax;
+
+      if (dto.customerId) sale.customer = { id: dto.customerId } as any;
+      if (dto.guestCustomer) {
+        sale.guestCustomer = dto.guestCustomer;
+        sale.customer = null;
+      }
+
+      const branchId = dto.branchId || sale.branch.id;
+
+      // 2. Si hay nuevos detalles, procesarlos
+      if (dto.details) {
+        // Validar stock primero
+        const stockErrors: string[] = [];
+        for (const det of dto.details) {
+          const inventory = await qr.manager.findOne(Inventory, {
+            where: { product: { id: det.productId }, branch: { id: branchId } },
+          });
+          if (!inventory || inventory.stock < det.quantity) {
+            stockErrors.push(
+              `Stock insuficiente para producto ID ${det.productId}`,
+            );
+          }
+        }
+        if (stockErrors.length > 0)
+          throw new BadRequestException({
+            message: 'Error de stock',
+            errors: stockErrors,
+          });
+
+        // Borrar detalles antiguos (TypeORM los reemplazará si usamos save con la relación,
+        // pero es más seguro manejarlos explícitamente en una edición compleja)
+        await qr.manager.delete(SaleDetail, { sale: { id: sale.id } });
+
+        let subtotal = 0;
+        let taxAmount = 0;
+        let lineDiscounts = 0;
+        const newDetails: SaleDetail[] = [];
+
+        for (const detailDto of dto.details) {
+          const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
+          const lineDiscount = (lineSubtotal * (detailDto.discount || 0)) / 100;
+          const lineAfterDiscount = lineSubtotal - lineDiscount;
+          const lineTax = sale.applyTax
+            ? (lineAfterDiscount * (detailDto.taxPercentage ?? 12)) / 100
+            : 0;
+          const lineTotal = lineAfterDiscount + lineTax;
+
+          const detail = qr.manager.create(SaleDetail, {
+            sale: sale,
+            product: { id: detailDto.productId },
+            quantity: detailDto.quantity,
+            unitPrice: detailDto.unitPrice,
+            discount: detailDto.discount || 0,
+            discountAmount: lineDiscount,
+            taxPercentage: sale.applyTax ? (detailDto.taxPercentage ?? 12) : 0,
+            taxAmount: lineTax,
+            lineTotal,
+          });
+          newDetails.push(detail);
+
+          subtotal += lineSubtotal;
+          lineDiscounts += lineDiscount;
+          taxAmount += lineTax;
+        }
+        sale.details = newDetails;
+        sale.subtotal = subtotal;
+        sale.taxAmount = taxAmount;
+        sale.discountAmount = lineDiscounts;
+      }
+
+      // Definir variables para el recalculo de impuestos proporcionales
+      const currentLineDiscounts = dto.details
+        ? sale.discountAmount
+        : sale.discountAmount -
+          (sale.discounts?.reduce(
+            (acc, d) => acc + Number(d.amountApplied),
+            0,
+          ) || 0);
+      // Nota: En la lógica de update, sale.discountAmount se usa de forma distinta.
+      // Vamos a simplificar: extraemos los valores necesarios para el calculo final.
+      const baseTaxAmount = sale.taxAmount;
+      const baseLineDiscounts = dto.details
+        ? sale.discountAmount
+        : Number(sale.discountAmount) -
+          (sale.discounts?.reduce(
+            (acc, d) => acc + Number(d.amountApplied),
+            0,
+          ) || 0);
+
+      // Corregir los nombres de variables para que coincidan con el bloque final
+      const currentTaxAmount = sale.taxAmount;
+      const currentLineDiscountsFinal = dto.details
+        ? sale.discountAmount
+        : Number(sale.discountAmount) -
+          (sale.discounts?.reduce(
+            (acc, d) => acc + Number(d.amountApplied),
+            0,
+          ) || 0);
+
+      // 3. Si hay nuevos descuentos globales
+      let discountCodeAmount = 0;
+      if (sale.discountCode) {
+        // Re-validar código de descuento con el nuevo subtotal
+        const validation = await this.discountCodeService.validateDiscountCode(
+          sale.discountCode.code,
+          sale.customer?.id,
+          undefined,
+          sale.subtotal,
+        );
+        if (validation.isValid) discountCodeAmount = validation.discountAmount;
+      }
+
+      let manualDiscountsAmount = 0;
+      if (dto.discounts) {
+        await qr.manager.delete(SaleDiscount, { sale: { id: sale.id } });
+        const newDiscounts: SaleDiscount[] = [];
+        for (const disDto of dto.discounts) {
+          const amount =
+            disDto.type === 'percent'
+              ? sale.subtotal * (disDto.value / 100)
+              : disDto.value;
+
+          manualDiscountsAmount += amount;
+          newDiscounts.push(
+            qr.manager.create(SaleDiscount, {
+              sale,
+              type: disDto.type,
+              value: disDto.value,
+              amountApplied: amount,
+              reason: disDto.reason,
+            }),
+          );
+        }
+        sale.discounts = newDiscounts;
+      } else {
+        // Si no vienen nuevos, recalculamos los montos de los existentes con el nuevo subtotal
+        for (const dis of sale.discounts) {
+          if (dis.type === 'percent') {
+            dis.amountApplied = sale.subtotal * (dis.value / 100);
+          }
+          manualDiscountsAmount += dis.amountApplied;
+        }
+      }
+
+      const globalDiscounts = manualDiscountsAmount + discountCodeAmount;
+      const totalDiscounts = currentLineDiscountsFinal + globalDiscounts;
+
+      // Ajuste de Impuestos Proporcional (Escenario 1)
+      const taxableBase = sale.subtotal - currentLineDiscountsFinal;
+      const finalTaxAmount =
+        taxableBase > 0
+          ? currentTaxAmount * ((taxableBase - globalDiscounts) / taxableBase)
+          : 0;
+
+      sale.taxAmount = finalTaxAmount;
+      sale.discountAmount = totalDiscounts;
+      sale.total = taxableBase - globalDiscounts + finalTaxAmount;
+      sale.pendingAmount = sale.total - (sale.paidAmount || 0);
+
+      await qr.manager.save(sale);
+      await qr.commitTransaction();
+
+      return this.findOne(id);
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
+    }
+  }
 
   async remove(id: string): Promise<{ message: string }> {
     const sale = await this.saleRepository.findOne({

@@ -1,10 +1,21 @@
-import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Inventory } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { ProductService } from './product.service';
 import { BranchService } from './branch.service';
-import { CreateInventoryDto, InventoryResponseDto, UpdateInventoryDto } from '../dto';
+import {
+  CreateInventoryDto,
+  InventoryResponseDto,
+  UpdateInventoryDto,
+} from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -23,7 +34,9 @@ export class InventoryService {
     try {
       product = await this.productService.findOne(dto.productId);
     } catch (error) {
-      throw new BadRequestException(`El producto con ID ${dto.productId} no existe`);
+      throw new BadRequestException(
+        `El producto con ID ${dto.productId} no existe`,
+      );
     }
 
     // Verificar si la sucursal existe
@@ -31,7 +44,9 @@ export class InventoryService {
     try {
       branch = await this.branchService.findOne(dto.branchId);
     } catch (error) {
-      throw new BadRequestException(`La sucursal con ID ${dto.branchId} no existe`);
+      throw new BadRequestException(
+        `La sucursal con ID ${dto.branchId} no existe`,
+      );
     }
 
     // Verificar si ya existe un inventario para este producto en esta sucursal
@@ -64,12 +79,58 @@ export class InventoryService {
     return this.findOne(savedInventory.id);
   }
 
-  async findAll(): Promise<InventoryResponseDto[]> {
+  async findAll(branchId?: string): Promise<InventoryResponseDto[]> {
+    const queryBuilder = this.inventoryRepository
+      .createQueryBuilder('inventory')
+      .leftJoinAndSelect('inventory.product', 'product')
+      .leftJoinAndSelect('product.category', 'category')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('inventory.branch', 'branch')
+      .where('inventory.deletedAt IS NULL');
+
+    if (branchId) {
+      queryBuilder.andWhere('branch.id = :branchId', { branchId });
+    }
+
+    const inventories = await queryBuilder
+      .select([
+        'inventory.id',
+        'inventory.stock',
+        'inventory.minStock',
+        'inventory.maxStock',
+        'inventory.lastMovementDate',
+        'inventory.createdAt',
+        'product.id',
+        'product.imageUrl',
+        'product.name',
+        'product.sku',
+        'product.barcode',
+        'product.price',
+        'product.cost',
+        'product.isActive',
+        'product.manageStock',
+        'category.id',
+        'category.name',
+        'unit.id',
+        'unit.name',
+        'unit.abbreviation',
+        'unit.allowsDecimals',
+        'branch.id',
+        'branch.name',
+      ])
+      .orderBy('branch.name', 'ASC')
+      .addOrderBy('product.name', 'ASC')
+      .getMany();
+
+    return plainToInstance(InventoryResponseDto, inventories);
+  }
+
+  async findAllWithoutFilter(user?: any): Promise<InventoryResponseDto[]> {
     const inventories = await this.inventoryRepository.find({
       where: { deletedAt: IsNull() },
       relations: ['product', 'product.category', 'product.unit', 'branch'],
       select: {
-        id: true, 
+        id: true,
         product: {
           id: true,
           imageUrl: true,
@@ -78,7 +139,7 @@ export class InventoryService {
           category: {
             id: true,
             name: true,
-          }
+          },
         },
         branch: {
           id: true,
@@ -86,7 +147,7 @@ export class InventoryService {
         },
         stock: true,
         lastMovementDate: true,
-        createdAt: true, 
+        createdAt: true,
       },
       order: { createdAt: 'DESC' },
     });
@@ -106,7 +167,10 @@ export class InventoryService {
     return plainToInstance(InventoryResponseDto, inventory);
   }
 
-  async findByProductAndBranch(productId: string, branchId: string): Promise<InventoryResponseDto> {
+  async findByProductAndBranch(
+    productId: string,
+    branchId: string,
+  ): Promise<InventoryResponseDto> {
     const inventory = await this.inventoryRepository.findOne({
       where: {
         product: { id: productId },
@@ -151,7 +215,10 @@ export class InventoryService {
     return plainToInstance(InventoryResponseDto, inventories);
   }
 
-  async update(id: string, dto: UpdateInventoryDto): Promise<InventoryResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateInventoryDto,
+  ): Promise<InventoryResponseDto> {
     const inventory = await this.inventoryRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['product', 'branch'],
@@ -212,7 +279,9 @@ export class InventoryService {
     }
 
     if (!inventory.deletedAt) {
-      throw new ConflictException(`El inventario con ID ${id} no está eliminado`);
+      throw new ConflictException(
+        `El inventario con ID ${id} no está eliminado`,
+      );
     }
 
     inventory.deletedAt = null;
@@ -261,7 +330,9 @@ export class InventoryService {
     const lowStockProducts = inventories.filter(
       (inv) => inv.stock > 0 && inv.stock <= inv.minStock,
     ).length;
-    const outOfStockProducts = inventories.filter((inv) => inv.stock === 0).length;
+    const outOfStockProducts = inventories.filter(
+      (inv) => inv.stock === 0,
+    ).length;
     const totalValue = inventories.reduce(
       (sum, inv) => sum + inv.stock * inv.product.cost,
       0,
@@ -275,7 +346,11 @@ export class InventoryService {
     };
   }
 
-  private validateStockLimits(stock: number, minStock?: number, maxStock?: number | null): void {
+  private validateStockLimits(
+    stock: number,
+    minStock?: number,
+    maxStock?: number | null,
+  ): void {
     console.log(minStock! > maxStock!);
     if (minStock && minStock < 0) {
       throw new BadRequestException('El stock mínimo no puede ser negativo');
@@ -285,12 +360,16 @@ export class InventoryService {
       throw new BadRequestException('El stock máximo no puede ser negativo');
     }
 
-    if ((maxStock && minStock) && (minStock > maxStock)) {
-      throw new BadRequestException('El stock mínimo no puede ser mayor al stock máximo');
+    if (maxStock && minStock && minStock > maxStock) {
+      throw new BadRequestException(
+        'El stock mínimo no puede ser mayor al stock máximo',
+      );
     }
 
     if (maxStock && stock > maxStock) {
-      throw new BadRequestException('El stock no puede ser mayor al stock máximo');
+      throw new BadRequestException(
+        'El stock no puede ser mayor al stock máximo',
+      );
     }
 
     if (stock < 0) {

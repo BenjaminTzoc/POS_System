@@ -23,6 +23,7 @@ import { plainToInstance } from 'class-transformer';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Branch } from 'src/logistics/entities';
 
 @Injectable()
 export class AuthService {
@@ -33,6 +34,8 @@ export class AuthService {
     private readonly roleRepository: Repository<Role>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Branch)
+    private readonly branchRepository: Repository<Branch>,
 
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -205,7 +208,7 @@ export class AuthService {
     });
 
     if (!role) {
-      throw new NotFoundException(`Rol con ID ${id} no encontrado`);
+      throw new NotFoundException(`El rol con ID ${id} al que intenta modificar no existe`);
     }
 
     // Verificar si el nuevo nombre ya existe
@@ -311,28 +314,48 @@ export class AuthService {
       throw new ConflictException(`El email '${dto.email}' ya está registrado`);
     }
 
-    // Verificar que el rol existe
-    const role = await this.roleRepository.findOne({
-      where: { id: dto.roleId, deletedAt: IsNull() },
+    const roles = await this.roleRepository.find({
+      where: { id: In(dto.roleIds), deletedAt: IsNull() },
+      relations: ['permissions'],
     });
 
-    if (!role) {
-      throw new BadRequestException(`El rol con ID ${dto.roleId} no existe`);
+    if (roles.length !== dto.roleIds.length) {
+      throw new BadRequestException(
+        'Algunos roles no existen o están eliminados',
+      );
+    }
+
+    const isSuperAdmin = roles.some((r) => r.isSuperAdmin);
+
+    let branch: any = null;
+
+    if (!isSuperAdmin) {
+      if (!dto.branchId) {
+        throw new BadRequestException(
+          'La sucursal es obligatoria para este usuario',
+        );
+      }
+
+      branch = await this.branchRepository.findOne({
+        where: { id: dto.branchId, deletedAt: IsNull() },
+      });
+
+      if (!branch) {
+        throw new BadRequestException('La sucursal no existe');
+      }
     }
 
     // Buscar permisos si se proporcionan
     let permissions: Permission[] = [];
-    if (dto.permissionIds && dto.permissionIds.length > 0) {
+
+    if (dto.permissionIds?.length) {
       permissions = await this.permissionRepository.find({
         where: { id: In(dto.permissionIds), deletedAt: IsNull() },
       });
-
-      if (permissions.length !== dto.permissionIds.length) {
-        throw new BadRequestException(
-          'Algunos permisos no existen o están eliminados',
-        );
-      }
     }
+
+    const rolePermissions = roles.flatMap((r) => r.permissions);
+    const mergedPermissions = [...permissions, ...rolePermissions];
 
     // Hash de la contraseña
     const saltRounds = 10;
@@ -342,8 +365,9 @@ export class AuthService {
       name: dto.name,
       email: dto.email,
       password: hashedPassword,
-      role,
-      permissions,
+      roles,
+      permissions: mergedPermissions,
+      branch: isSuperAdmin ? null : branch,
       emailVerified: false,
     });
 
@@ -354,7 +378,7 @@ export class AuthService {
   async findAllUsers(): Promise<UserResponseDto[]> {
     const users = await this.userRepository.find({
       where: { deletedAt: IsNull() },
-      relations: ['role', 'permissions'],
+      relations: ['roles', 'permissions', 'branch'],
       order: { createdAt: 'DESC' },
     });
     return plainToInstance(UserResponseDto, users);
@@ -363,7 +387,7 @@ export class AuthService {
   async findOneUser(id: string): Promise<UserResponseDto> {
     const user = await this.userRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['role', 'permissions'],
+      relations: ['roles', 'permissions', 'branch'],
     });
 
     if (!user) {
@@ -376,7 +400,7 @@ export class AuthService {
   async findUserByEmail(email: string): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { email, deletedAt: IsNull() },
-      relations: ['role', 'permissions'],
+      relations: ['roles', 'permissions', 'branch'],
     });
 
     if (!user) {
@@ -389,14 +413,14 @@ export class AuthService {
   async updateUser(id: string, dto: UpdateUserDto): Promise<UserResponseDto> {
     const user = await this.userRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['role', 'permissions'],
+      relations: ['roles', 'permissions', 'branch'],
     });
 
     if (!user) {
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     }
 
-    // Verificar si el nuevo email ya existe
+    // ====== VALIDAR EMAIL NUEVO ======
     if (dto.email && dto.email !== user.email) {
       const existingUser = await this.userRepository.findOne({
         where: { email: dto.email, deletedAt: IsNull() },
@@ -409,39 +433,66 @@ export class AuthService {
       }
     }
 
-    // Actualizar rol si se proporciona
-    if (dto.roleId) {
-      const role = await this.roleRepository.findOne({
-        where: { id: dto.roleId, deletedAt: IsNull() },
+    // ====== ACTUALIZAR ROLES ======
+    if (dto.roleIds) {
+      const roles = await this.roleRepository.find({
+        where: { id: In(dto.roleIds), deletedAt: IsNull() },
+        relations: ['permissions'],
       });
 
-      if (!role) {
-        throw new BadRequestException(`El rol con ID ${dto.roleId} no existe`);
-      }
-      user.role = role;
-    }
-
-    // Actualizar permisos si se proporcionan
-    if (dto.permissionIds) {
-      const permissions = await this.permissionRepository.find({
-        where: { id: In(dto.permissionIds), deletedAt: IsNull() },
-      });
-
-      if (permissions.length !== dto.permissionIds.length) {
+      if (roles.length !== dto.roleIds.length) {
         throw new BadRequestException(
-          'Algunos permisos no existen o están eliminados',
+          'Algunos roles no existen o están eliminados',
         );
       }
-      user.permissions = permissions;
+
+      user.roles = roles;
     }
+
+    const isSuperAdmin = user.roles.some((r) => r.isSuperAdmin);
+
+    if (!isSuperAdmin) {
+      if (dto.branchId !== undefined) {
+        if (dto.branchId === null) {
+          user.branch = null;
+        } else {
+          const branch = await this.branchRepository.findOne({
+            where: { id: dto.branchId, deletedAt: IsNull() },
+          });
+
+          if (!branch) {
+            throw new BadRequestException('La sucursal no existe');
+          }
+
+          user.branch = branch;
+        }
+      }
+    }
+
+    if (isSuperAdmin) {
+      user.branch = null;
+    }
+
+    let directPermissions = user.permissions;
+
+    if (dto.permissionIds) {
+      directPermissions = await this.permissionRepository.find({
+        where: { id: In(dto.permissionIds), deletedAt: IsNull() },
+      });
+    }
+
+    const rolePermissions = user.roles.flatMap((r) => r.permissions);
+
+    user.permissions = [...directPermissions, ...rolePermissions];
 
     // Actualizar otros campos
     if (dto.name) user.name = dto.name;
     if (dto.email) user.email = dto.email;
+
     if (dto.password) {
-      const saltRounds = 10;
-      user.password = await bcrypt.hash(dto.password, saltRounds);
+      user.password = await bcrypt.hash(dto.password, 10);
     }
+
     if (dto.emailVerified !== undefined) user.emailVerified = dto.emailVerified;
 
     const updatedUser = await this.userRepository.save(user);
@@ -465,7 +516,7 @@ export class AuthService {
     const user = await this.userRepository.findOne({
       where: { id },
       withDeleted: true,
-      relations: ['role', 'permissions'],
+      relations: ['roles', 'permissions', 'branch'],
     });
 
     if (!user) {
@@ -490,7 +541,7 @@ export class AuthService {
   async validateUser(
     email: string,
     password: string,
-  ): Promise<{ user: UserResponseDto; accessToken: string }> {
+  ): Promise<{ user?: UserResponseDto; accessToken: string }> {
     const user = await this.findUserByEmail(email);
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -512,18 +563,20 @@ export class AuthService {
   private async generateJwt(user: User): Promise<{ accessToken: string }> {
     const userWithRelations = await this.userRepository.findOne({
       where: { id: user.id },
-      relations: ['role', 'permissions', 'branch'],
+      relations: ['roles', 'permissions', 'branch'],
     });
 
     const payload = {
       sub: userWithRelations?.id,
       email: userWithRelations?.email,
-      role: userWithRelations?.role.name,
-      isSuperAdmin: userWithRelations?.role.isSuperAdmin,
-      branchId: userWithRelations?.branch.id,
+      isSuperAdmin: userWithRelations?.roles.some((r) => r.isSuperAdmin),
+      branchId: userWithRelations?.branch?.id ?? null,
+      roles: userWithRelations?.roles.map((r) => r.name),
       permissions: [
         ...userWithRelations!.permissions.map((p) => p.name),
-        ...userWithRelations!.role.permissions.map((p) => p.name),
+        ...userWithRelations!.roles.flatMap((r) =>
+          r.permissions.map((p) => p.name),
+        ),
       ],
     };
 

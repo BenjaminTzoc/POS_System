@@ -56,6 +56,13 @@ export class Sale extends BaseEntity {
   subtotal: number;
 
   @Column({
+    name: 'apply_tax',
+    type: 'boolean',
+    default: true,
+  })
+  applyTax: boolean;
+
+  @Column({
     name: 'tax_amount',
     type: 'decimal',
     precision: 12,

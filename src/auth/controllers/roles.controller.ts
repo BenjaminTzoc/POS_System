@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { CreateRoleDto, RoleResponseDto, UpdateRoleDto } from '../dto';
 import { AuthService } from '../auth.service';
 import { Permissions, Public } from '../decorators';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import { PermissionsGuard } from '../guards/permissions.guard';
 
 @Controller('roles')
 export class RolesController {
@@ -31,7 +33,7 @@ export class RolesController {
   }
 
   @Put(':id')
-  @Permissions('roles.update')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   updateRole(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateRoleDto,

@@ -1,6 +1,7 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -30,6 +31,15 @@ export class CreateSaleDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  applyTax?: boolean;
+
+  @IsOptional()
   @IsEnum(SaleStatus)
   status?: SaleStatus;
 
@@ -50,7 +60,7 @@ export class CreateSaleDto {
   @IsUUID()
   discountCodeId?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsUUID()
   branchId: string;
 
@@ -68,5 +78,5 @@ export class CreateSaleDto {
 }
 
 export class UpdateSaleDto extends PartialType(
-  OmitType(CreateSaleDto, ['details', 'discounts'] as const),
+  OmitType(CreateSaleDto, ['status'] as const),
 ) {}

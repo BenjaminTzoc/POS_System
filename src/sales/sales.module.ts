@@ -27,6 +27,7 @@ import {
 import { LogisticsModule } from 'src/logistics/logistics.module';
 import { PurchasesModule } from 'src/purchases/purchases.module';
 import { SaleGateway } from './gateway/sale.gateway';
+import { Branch } from 'src/logistics/entities';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { SaleGateway } from './gateway/sale.gateway';
       Sale,
       SalePayment,
       SaleDetail,
+      Branch,
     ]),
     LogisticsModule,
     PurchasesModule,

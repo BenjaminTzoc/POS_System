@@ -1,10 +1,19 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaymentMethodService } from 'src/purchases/services';
 import { Repository, DataSource, IsNull } from 'typeorm';
 import { SalePayment, Sale, SaleStatus, PaymentStatus } from '../entities';
 import { SaleService } from '.';
-import { CreateSalePaymentDto, SalePaymentResponseDto, UpdateSalePaymentDto } from '../dto';
+import {
+  CreateSalePaymentDto,
+  SalePaymentResponseDto,
+  UpdateSalePaymentDto,
+} from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -31,9 +40,13 @@ export class SalePaymentService {
     // Validar que el método de pago existe
     let paymentMethod;
     try {
-      paymentMethod = await this.paymentMethodService.findOne(dto.paymentMethodId);
+      paymentMethod = await this.paymentMethodService.findOne(
+        dto.paymentMethodId,
+      );
     } catch (error) {
-      throw new BadRequestException(`El método de pago con ID ${dto.paymentMethodId} no existe`);
+      throw new BadRequestException(
+        `El método de pago con ID ${dto.paymentMethodId} no existe`,
+      );
     }
 
     // Validar que el método de pago esté activo
@@ -43,17 +56,42 @@ export class SalePaymentService {
 
     // Validar que se requiere cuenta bancaria si el método lo requiere
     if (paymentMethod.requiresBankAccount && !dto.bankAccount) {
-      throw new BadRequestException('Este método de pago requiere una cuenta bancaria');
+      throw new BadRequestException(
+        'Este método de pago requiere una cuenta bancaria',
+      );
     }
 
-    // Validar que la venta esté confirmada
-    if (sale.status !== SaleStatus.CONFIRMED) {
-      throw new BadRequestException('Solo se pueden agregar pagos a ventas confirmadas');
+    if (sale.status === SaleStatus.PENDING) {
+      try {
+        const branchId = sale.branch?.id;
+        if (!branchId) {
+          throw new BadRequestException(
+            'La venta no tiene una sucursal asociada',
+          );
+        }
+
+        await this.saleService.confirmSale(sale.id, branchId);
+
+        sale = await this.saleService.findOne(dto.saleId);
+      } catch (error) {
+        throw new BadRequestException(
+          'No se pudo confirmar la venta antes de registrar el pago: ' +
+            error.message,
+        );
+      }
+    }
+
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException(
+        'No se pueden agregar pagos a una venta cancelada',
+      );
     }
 
     // Validar que el monto no exceda el pendiente
     if (dto.amount > sale.pendingAmount) {
-      throw new BadRequestException(`El monto excede el saldo pendiente de Q${sale.pendingAmount}`);
+      throw new BadRequestException(
+        `El monto excede el saldo pendiente de Q${sale.pendingAmount}`,
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -65,7 +103,7 @@ export class SalePaymentService {
       const payment = queryRunner.manager.create(SalePayment, {
         sale: { id: dto.saleId },
         paymentMethod: { id: dto.paymentMethodId },
-        amount: dto.amount,
+        amount: Number(dto.amount),
         date: new Date(dto.date),
         referenceNumber: dto.referenceNumber,
         bankAccount: dto.bankAccount,
@@ -76,8 +114,8 @@ export class SalePaymentService {
       const savedPayment = await queryRunner.manager.save(payment);
 
       // Actualizar los montos de la venta
-      const newPaidAmount = sale.paidAmount + dto.amount;
-      const newPendingAmount = sale.total - newPaidAmount;
+      const newPaidAmount = Number(sale.paidAmount) + Number(dto.amount);
+      const newPendingAmount = Number(sale.total) - Number(newPaidAmount);
 
       await queryRunner.manager.update(Sale, sale.id, {
         paidAmount: newPaidAmount,
@@ -118,9 +156,9 @@ export class SalePaymentService {
 
   async findBySale(saleId: string): Promise<SalePaymentResponseDto[]> {
     const payments = await this.paymentRepository.find({
-      where: { 
+      where: {
         sale: { id: saleId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['sale', 'paymentMethod'],
       order: { date: 'ASC' },
@@ -128,11 +166,13 @@ export class SalePaymentService {
     return plainToInstance(SalePaymentResponseDto, payments);
   }
 
-  async findByPaymentMethod(paymentMethodId: string): Promise<SalePaymentResponseDto[]> {
+  async findByPaymentMethod(
+    paymentMethodId: string,
+  ): Promise<SalePaymentResponseDto[]> {
     const payments = await this.paymentRepository.find({
-      where: { 
+      where: {
         paymentMethod: { id: paymentMethodId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['sale', 'sale.customer', 'paymentMethod'],
       order: { date: 'DESC' },
@@ -140,7 +180,10 @@ export class SalePaymentService {
     return plainToInstance(SalePaymentResponseDto, payments);
   }
 
-  async findByDateRange(startDate: string, endDate: string): Promise<SalePaymentResponseDto[]> {
+  async findByDateRange(
+    startDate: string,
+    endDate: string,
+  ): Promise<SalePaymentResponseDto[]> {
     const payments = await this.paymentRepository
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.sale', 'sale')
@@ -158,7 +201,10 @@ export class SalePaymentService {
     return plainToInstance(SalePaymentResponseDto, payments);
   }
 
-  async update(id: string, dto: UpdateSalePaymentDto): Promise<SalePaymentResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateSalePaymentDto,
+  ): Promise<SalePaymentResponseDto> {
     const payment = await this.paymentRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['sale'],
@@ -190,8 +236,10 @@ export class SalePaymentService {
       const newPaidAmount = temporaryPaidAmount + newAmount;
       const newPendingAmount = sale.total - newPaidAmount;
 
-      if (newAmount > (temporaryPendingAmount + oldAmount)) {
-        throw new BadRequestException(`El nuevo monto excede el saldo pendiente disponible`);
+      if (newAmount > temporaryPendingAmount + oldAmount) {
+        throw new BadRequestException(
+          `El nuevo monto excede el saldo pendiente disponible`,
+        );
       }
 
       // Actualizar el pago
@@ -276,7 +324,9 @@ export class SalePaymentService {
     }
 
     // No permitir eliminación física, solo cancelación
-    throw new BadRequestException('Use el endpoint de cancelación en lugar de eliminar el pago');
+    throw new BadRequestException(
+      'Use el endpoint de cancelación en lugar de eliminar el pago',
+    );
   }
 
   async getPaymentStats(): Promise<{
@@ -301,9 +351,9 @@ export class SalePaymentService {
       averagePayment: 0,
     };
 
-    payments.forEach(payment => {
+    payments.forEach((payment) => {
       stats.totalAmount += payment.amount;
-      
+
       if (payment.status === PaymentStatus.COMPLETED) {
         stats.completedPayments++;
       } else if (payment.status === PaymentStatus.CANCELLED) {
@@ -311,15 +361,21 @@ export class SalePaymentService {
       }
 
       const methodName = payment.paymentMethod.name;
-      stats.byPaymentMethod[methodName] = (stats.byPaymentMethod[methodName] || 0) + payment.amount;
+      stats.byPaymentMethod[methodName] =
+        (stats.byPaymentMethod[methodName] || 0) + payment.amount;
     });
 
-    stats.averagePayment = stats.totalPayments > 0 ? stats.totalAmount / stats.totalPayments : 0;
+    stats.averagePayment =
+      stats.totalPayments > 0 ? stats.totalAmount / stats.totalPayments : 0;
 
     return stats;
   }
 
-  async getDailyPayments(date: string): Promise<{ date: string; total: number; payments: SalePaymentResponseDto[] }> {
+  async getDailyPayments(date: string): Promise<{
+    date: string;
+    total: number;
+    payments: SalePaymentResponseDto[];
+  }> {
     const targetDate = new Date(date);
     const nextDate = new Date(targetDate);
     nextDate.setDate(nextDate.getDate() + 1);
@@ -347,7 +403,9 @@ export class SalePaymentService {
     };
   }
 
-  async getCustomerPayments(customerId: string): Promise<SalePaymentResponseDto[]> {
+  async getCustomerPayments(
+    customerId: string,
+  ): Promise<SalePaymentResponseDto[]> {
     const payments = await this.paymentRepository
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.sale', 'sale')
@@ -363,19 +421,31 @@ export class SalePaymentService {
   }
 
   async createPartialPayment(
-    saleId: string, 
-    payments: Array<{ paymentMethodId: string; amount: number; referenceNumber?: string; bankAccount?: string }>
+    saleId: string,
+    payments: Array<{
+      paymentMethodId: string;
+      amount: number;
+      referenceNumber?: string;
+      bankAccount?: string;
+    }>,
   ): Promise<SalePaymentResponseDto[]> {
     const sale = await this.saleService.findOne(saleId);
-    
-    if (sale.status !== SaleStatus.CONFIRMED) {
-      throw new BadRequestException('Solo se pueden agregar pagos a ventas confirmadas');
+
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException(
+        'No se pueden agregar pagos a una venta cancelada',
+      );
     }
 
-    const totalPaymentAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
-    
+    const totalPaymentAmount = payments.reduce(
+      (sum, payment) => sum + payment.amount,
+      0,
+    );
+
     if (totalPaymentAmount > sale.pendingAmount) {
-      throw new BadRequestException(`El monto total de pagos excede el saldo pendiente de Q${sale.pendingAmount}`);
+      throw new BadRequestException(
+        `El monto total de pagos excede el saldo pendiente de Q${sale.pendingAmount}`,
+      );
     }
 
     const createdPayments: SalePaymentResponseDto[] = [];
@@ -396,7 +466,9 @@ export class SalePaymentService {
         });
 
         const savedPayment = await queryRunner.manager.save(payment);
-        createdPayments.push(plainToInstance(SalePaymentResponseDto, savedPayment));
+        createdPayments.push(
+          plainToInstance(SalePaymentResponseDto, savedPayment),
+        );
       }
 
       // Actualizar los montos de la venta

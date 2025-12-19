@@ -1,10 +1,24 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, Min, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  IsUUID,
+  IsNumber,
+  IsEnum,
+  Min,
+  IsDateString,
+} from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { ProductResponseDto } from './product.dto';
 import { BranchResponseDto } from './branch.dto';
 import { InventoryResponseDto } from './inventory.dto';
-import { MovementType, MovementStatus } from '../entities/inventory-movement.entity';
+import { UserResponseDto } from 'src/auth/dto/user.dto';
+import {
+  MovementType,
+  MovementStatus,
+  MovementConcept,
+} from '../entities/inventory-movement.entity';
 
 export class CreateInventoryMovementDto {
   @IsNotEmpty()
@@ -35,6 +49,14 @@ export class CreateInventoryMovementDto {
   @IsOptional()
   @IsUUID()
   referenceId?: string;
+
+  @IsOptional()
+  @IsString()
+  referenceNumber?: string;
+
+  @IsOptional()
+  @IsEnum(MovementConcept)
+  concept?: MovementConcept;
 
   @IsOptional()
   @IsUUID()
@@ -89,6 +111,16 @@ export class UpdateInventoryMovementDto {
   @IsNumber()
   @Min(0)
   totalCost?: number;
+
+  @IsOptional()
+  @IsString()
+  cancellationReason?: string;
+}
+
+export class CancelMovementDto {
+  @IsNotEmpty()
+  @IsString()
+  reason: string;
 }
 
 export class InventoryMovementResponseDto extends BaseEntity {
@@ -105,6 +137,18 @@ export class InventoryMovementResponseDto extends BaseEntity {
   inventory: InventoryResponseDto | null;
 
   @Expose()
+  @Type(() => UserResponseDto)
+  createdBy: UserResponseDto | null;
+
+  @Expose()
+  @Type(() => UserResponseDto)
+  completedBy: UserResponseDto | null;
+
+  @Expose()
+  @Type(() => UserResponseDto)
+  cancelledBy: UserResponseDto | null;
+
+  @Expose()
   quantity: number;
 
   @Expose()
@@ -115,6 +159,12 @@ export class InventoryMovementResponseDto extends BaseEntity {
 
   @Expose()
   referenceId: string;
+
+  @Expose()
+  referenceNumber: string;
+
+  @Expose()
+  concept: MovementConcept;
 
   @Expose()
   @Type(() => BranchResponseDto)
@@ -134,10 +184,22 @@ export class InventoryMovementResponseDto extends BaseEntity {
   completedAt: Date;
 
   @Expose()
+  cancelledAt: Date;
+
+  @Expose()
+  cancellationReason: string;
+
+  @Expose()
   unitCost: number;
 
   @Expose()
   totalCost: number;
+
+  @Expose()
+  previousStock: number;
+
+  @Expose()
+  newStock: number;
 
   @Expose()
   declare createdAt: Date;

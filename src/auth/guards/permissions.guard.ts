@@ -1,5 +1,10 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
-import { Reflector } from "@nestjs/core";
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -22,17 +27,20 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('Usuario no autenticado');
     }
 
-    if (user.role?.isSuperAdmin) {
+    const isSuperAdmin = user.roles?.some((r: any) => r.isSuperAdmin);
+    if (isSuperAdmin) {
       return true;
     }
 
-    // Obtener todos los permisos del usuario (de su rol + permisos directos)
-    const userPermissions = new Set([
-      ...(user.role?.permissions?.map(p => p.name) || []),
-      ...(user.permissions?.map(p => p.name) || []),
-    ]);
+    // Obtener todos los permisos del usuario (de sus roles + permisos directos)
+    const rolePermissions =
+      user.roles?.flatMap((r: any) => r.permissions?.map((p: any) => p.name)) ||
+      [];
+    const directPermissions = user.permissions?.map((p: any) => p.name) || [];
 
-    const hasPermission = requiredPermissions.some(permission =>
+    const userPermissions = new Set([...rolePermissions, ...directPermissions]);
+
+    const hasPermission = requiredPermissions.some((permission) =>
       userPermissions.has(permission),
     );
 

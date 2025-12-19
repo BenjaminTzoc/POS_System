@@ -14,6 +14,7 @@ import {
 import { AuthService } from '../auth.service';
 import { CreateUserDto, UpdateUserDto, UserResponseDto } from '../dto';
 import { Permissions, Public } from '../decorators';
+import { User } from '../entities';
 
 @Controller('users')
 export class UsersController {
@@ -28,26 +29,28 @@ export class UsersController {
   }
 
   @Get()
-  @Public()
-  // @Permissions('users.read')
+  // @Public()
+  @Permissions('users.manage')
   findAllUsers(): Promise<UserResponseDto[]> {
     return this.authService.findAllUsers();
   }
 
   @Get(':id')
-  // @Permissions('users.read')
+  @Permissions('users.manage')
   findOneUser(
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<UserResponseDto> {
     return this.authService.findOneUser(id);
   }
 
-  // @Get('email/:email')
-  // findUserByEmail(@Param('email') email: string): Promise<UserResponseDto> {
-  //   return this.authService.findUserByEmail(email);
-  // }
+  @Get('email/:email')
+  @Public()
+  findUserByEmail(@Param('email') email: string): Promise<User> {
+    return this.authService.findUserByEmail(email);
+  }
 
   @Put(':id')
+  @Public()
   // @Permissions('users.update')
   updateUser(
     @Param('id', ParseUUIDPipe) id: string,
@@ -79,7 +82,7 @@ export class UsersController {
   login(
     @Body('email') email: string,
     @Body('password') password: string,
-  ): Promise<{ user: UserResponseDto; accessToken: string }> {
+  ): Promise<{ user?: UserResponseDto; accessToken: string }> {
     return this.authService.validateUser(email, password);
   }
 }

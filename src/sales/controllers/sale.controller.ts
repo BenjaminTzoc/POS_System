@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,11 +10,14 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
+  Req,
 } from '@nestjs/common';
 import { SaleService } from '../services';
 import { CreateSaleDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { SaleStatus } from '../entities';
-import { Public } from 'src/auth/decorators';
+import { Permissions, Public } from 'src/auth/decorators';
+
+import { isSuperAdmin } from 'src/utils/user-scope.util';
 
 @Controller('sales')
 export class SaleController {
@@ -28,31 +32,61 @@ export class SaleController {
   }
 
   @Post()
-  @Public()
+  @Permissions('orders.create')
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateSaleDto): Promise<SaleResponseDto> {
+  create(@Body() dto: CreateSaleDto, @Req() req): Promise<SaleResponseDto> {
+    const user = req.user;
+
+    if (isSuperAdmin(user)) {
+      return this.saleService.create(dto);
+    }
+
+    if (!user.branch) {
+      throw new BadRequestException(
+        'El usuario no tiene una sucursal asignada.',
+      );
+    }
+
+    console.log('USUARIO --->>>', user);
+    dto.branchId = user.branch.id;
     return this.saleService.create(dto);
   }
 
-  @Post(':id/confirm/:branchId')
+  @Post(':id/confirm')
   @HttpCode(HttpStatus.OK)
   confirmSale(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Req() req,
   ): Promise<SaleResponseDto> {
-    return this.saleService.confirmSale(id, branchId);
+    const userId = req.user?.id;
+    return this.saleService.confirmSale(id, undefined, userId);
+  }
+
+  @Post(':id/deliver')
+  @HttpCode(HttpStatus.OK)
+  deliverSale(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SaleResponseDto> {
+    return this.saleService.deliverSale(id);
   }
 
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
-  cancelSale(@Param('id', ParseUUIDPipe) id: string): Promise<SaleResponseDto> {
-    return this.saleService.cancelSale(id);
+  cancelSale(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req,
+  ): Promise<SaleResponseDto> {
+    const userId = req.user?.id;
+    return this.saleService.cancelSale(id, userId);
   }
 
   @Get()
-  @Public()
-  findAll(): Promise<SaleResponseDto[]> {
-    return this.saleService.findAll();
+  @Permissions('orders.view')
+  findAll(@Req() req): Promise<SaleResponseDto[]> {
+    const user = req.user;
+    const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
+
+    return this.saleService.findAll(branchId);
   }
 
   @Get('customer/:customerId')
@@ -92,13 +126,13 @@ export class SaleController {
     return this.saleService.findOne(id);
   }
 
-  // @Put(':id')
-  // update(
-  //   @Param('id', ParseUUIDPipe) id: string,
-  //   @Body() dto: UpdateSaleDto,
-  // ): Promise<SaleResponseDto> {
-  //   return this.saleService.update(id, dto);
-  // }
+  @Put(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSaleDto,
+  ): Promise<SaleResponseDto> {
+    return this.saleService.update(id, dto);
+  }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)

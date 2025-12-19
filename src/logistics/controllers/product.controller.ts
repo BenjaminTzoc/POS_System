@@ -1,15 +1,36 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Req,
+  UploadedFile,
+  UseInterceptors,
+  UseGuards,
+  ForbiddenException,
+} from '@nestjs/common';
 import { ProductService } from '../services';
 import { CreateProductDto, ProductResponseDto, UpdateProductDto } from '../dto';
-import { Public } from 'src/auth/decorators';
+import { Permissions, Public } from 'src/auth/decorators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from 'src/auth/guards/permissions.guard';
+import { isSuperAdmin } from 'src/utils/user-scope.util';
 
 @Controller('products')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ProductController {
-  constructor(
-    private readonly productService: ProductService,
-  ) {}
+  constructor(private readonly productService: ProductService) {}
 
   @Post()
   @Public()
@@ -20,21 +41,55 @@ export class ProductController {
     @UploadedFile() image?: Express.Multer.File,
   ) {
     const product = await this.productService.createWithInventory(dto, image);
-    return { id: product.id }
+    return { id: product.id };
   }
 
   @Get()
-  @Public()
-  async findAll(
-    @Query('branchId') branchId?: string,
-  ): Promise<ProductResponseDto[]> {
+  @Permissions('products.manage')
+  async findAll(@Req() req): Promise<ProductResponseDto[]> {
+    const user = req.user;
+
+    const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
+
+    if (!isSuperAdmin(user) && !branchId) {
+      throw new ForbiddenException('Usuario sin sucursal asignada');
+    }
+
     return this.productService.findAll(branchId);
   }
 
   @Get('search')
-  @Public()
-  search(@Query('q') query: string): Promise<ProductResponseDto[]> {
-    return this.productService.searchProducts(query);
+  async search(
+    @Query('q') query: string,
+    @Query('branchId') branchIdParam: string,
+    @Req() req,
+  ): Promise<ProductResponseDto[]> {
+    const user = req.user;
+
+    // Si es SuperAdmin, puede filtrar por la sucursal que quiera (o null para global)
+    // Si NO es SuperAdmin, se fuerza su sucursal asignada
+    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
+
+    if (!isSuperAdmin(user) && !branchId) {
+      throw new ForbiddenException('Usuario sin sucursal asignada');
+    }
+
+    return this.productService.searchProducts(query, branchId);
+  }
+
+  @Get('top-selling')
+  async getTopSelling(
+    @Query('branchId') branchIdParam: string,
+    @Req() req,
+  ): Promise<ProductResponseDto[]> {
+    const user = req.user;
+    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
+
+    if (!isSuperAdmin(user) && !branchId) {
+      throw new ForbiddenException('Usuario sin sucursal asignada');
+    }
+
+    return this.productService.getTopSelling(branchId);
   }
 
   @Get('sku/:sku')
@@ -45,55 +100,62 @@ export class ProductController {
 
   @Get('barcode/:barcode')
   @Public()
-  findByBarcode(@Param('barcode') barcode: string): Promise<ProductResponseDto> {
+  findByBarcode(
+    @Param('barcode') barcode: string,
+  ): Promise<ProductResponseDto> {
     return this.productService.findByBarcode(barcode);
   }
 
   @Get(':id')
-  @Public()
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<ProductResponseDto> {
-    return this.productService.findOne(id);
+  @Permissions('products.manage')
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req,
+  ): Promise<ProductResponseDto> {
+    const user = req.user;
+
+    const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
+
+    if (!isSuperAdmin(user) && !branchId) {
+      throw new ForbiddenException('Usuario sin sucursal asignada');
+    }
+
+    return this.productService.findOne(id, branchId);
   }
 
   @Put(':id')
   @Public()
-  @UseInterceptors(FileInterceptor('image', {
-    storage: memoryStorage(),
-    limits: {
-      fileSize: 5 * 1024 * 1024, // 5MB
-    },
-    fileFilter: (req, file, cb) => {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new BadRequestException('Solo se permiten archivos de imagen'), false);
-      }
-    },
-  }))
+  @UseInterceptors(FileInterceptor('image'))
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateProductDto,
-    @UploadedFile() image?: any,
+    @UploadedFile() image?: Express.Multer.File,
   ): Promise<ProductResponseDto> {
+    console.log('DTOoooooooooooo --->', dto);
     return this.productService.update(id, dto, image);
   }
 
   // NUEVO ENDPOINT para actualizar solo la imagen
   @Put(':id/image')
   @Public()
-  @UseInterceptors(FileInterceptor('image', {
-    storage: memoryStorage(),
-    limits: {
-      fileSize: 5 * 1024 * 1024, // 5MB
-    },
-    fileFilter: (req, file, cb) => {
-      if (file.mimetype.startsWith('image/')) {
-        cb(null, true);
-      } else {
-        cb(new BadRequestException('Solo se permiten archivos de imagen'), false);
-      }
-    },
-  }))
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB
+      },
+      fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+          cb(null, true);
+        } else {
+          cb(
+            new BadRequestException('Solo se permiten archivos de imagen'),
+            false,
+          );
+        }
+      },
+    }),
+  )
   @HttpCode(HttpStatus.OK)
   updateImage(
     @Param('id', ParseUUIDPipe) id: string,
