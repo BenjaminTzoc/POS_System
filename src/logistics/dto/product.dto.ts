@@ -176,13 +176,13 @@ export class ProductResponseDto extends BaseEntity {
   @Type(() => UnitResponseDto)
   unit: UnitResponseDto | null;
 
-  @Exclude()
+  @Expose()
   declare createdAt: Date;
 
-  @Exclude()
+  @Expose()
   declare updatedAt: Date;
 
-  @Exclude()
+  @Expose()
   declare deletedAt: Date | null;
 }
 

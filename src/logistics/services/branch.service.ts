@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Branch } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -13,13 +17,18 @@ export class BranchService {
   ) {}
 
   async create(dto: CreateBranchDto): Promise<BranchResponseDto> {
-    // Verificar si el nombre de sucursal ya existe
+    // Verificar si el nombre de sucursal ya existe (incluyendo eliminadas)
     const existingBranch = await this.branchRepository.findOne({
       where: { name: dto.name },
-      withDeleted: false,
+      withDeleted: true,
     });
 
     if (existingBranch) {
+      if (existingBranch.deletedAt) {
+        throw new ConflictException(
+          `La sucursal '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador.`,
+        );
+      }
       throw new ConflictException(`La sucursal '${dto.name}' ya existe`);
     }
 
@@ -28,17 +37,21 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, savedBranch);
   }
 
-  async findAll(): Promise<BranchResponseDto[]> {
+  async findAll(includeDeleted: boolean = false): Promise<BranchResponseDto[]> {
     const branches = await this.branchRepository.find({
-      where: { deletedAt: IsNull() },
+      withDeleted: includeDeleted,
       order: { name: 'ASC' },
     });
     return plainToInstance(BranchResponseDto, branches);
   }
 
-  async findOne(id: string): Promise<BranchResponseDto> {
+  async findOne(
+    id: string,
+    includeDeleted: boolean = false,
+  ): Promise<BranchResponseDto> {
     const branch = await this.branchRepository.findOne({
-      where: { id, deletedAt: IsNull() },
+      where: { id },
+      withDeleted: includeDeleted,
     });
 
     if (!branch) {
@@ -57,13 +70,19 @@ export class BranchService {
       throw new NotFoundException(`Sucursal con ID ${id} no encontrada`);
     }
 
-    // Verificar si el nuevo nombre ya existe
+    // Verificar si el nuevo nombre ya existe (incluyendo eliminadas)
     if (dto.name && dto.name !== branch.name) {
       const existingBranch = await this.branchRepository.findOne({
-        where: { name: dto.name, deletedAt: IsNull() },
+        where: { name: dto.name },
+        withDeleted: true,
       });
 
       if (existingBranch) {
+        if (existingBranch.deletedAt) {
+          throw new ConflictException(
+            `No se puede usar el nombre '${dto.name}' porque pertenece a una sucursal inactiva. Considere reactivarla o contacte con el administrador.`,
+          );
+        }
         throw new ConflictException(`La sucursal '${dto.name}' ya existe`);
       }
     }
@@ -76,7 +95,12 @@ export class BranchService {
   async remove(id: string): Promise<{ message: string }> {
     const branch = await this.branchRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['inventories', 'movements', 'outgoingTransfers', 'incomingTransfers'],
+      relations: [
+        'inventories',
+        'movements',
+        'outgoingTransfers',
+        'incomingTransfers',
+      ],
     });
 
     if (!branch) {
@@ -130,10 +154,19 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, restoredBranch);
   }
 
-  async searchBranches(query: string): Promise<BranchResponseDto[]> {
-    const branches = await this.branchRepository
-      .createQueryBuilder('branch')
-      .where('branch.deletedAt IS NULL')
+  async searchBranches(
+    query: string,
+    includeDeleted: boolean = false,
+  ): Promise<BranchResponseDto[]> {
+    const queryBuilder = this.branchRepository.createQueryBuilder('branch');
+
+    if (!includeDeleted) {
+      queryBuilder.where('branch.deletedAt IS NULL');
+    } else {
+      queryBuilder.withDeleted();
+    }
+
+    const branches = await queryBuilder
       .andWhere(
         '(branch.name ILIKE :query OR branch.address ILIKE :query OR branch.email ILIKE :query)',
         { query: `%${query}%` },
@@ -144,10 +177,18 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, branches);
   }
 
-  async getBranchesStats(): Promise<{ total: number; active: number; deleted: number }> {
+  async getBranchesStats(): Promise<{
+    total: number;
+    active: number;
+    deleted: number;
+  }> {
     const total = await this.branchRepository.count();
-    const active = await this.branchRepository.count({ where: { deletedAt: IsNull() } });
-    const deleted = await this.branchRepository.count({ where: { deletedAt: IsNull() } });
+    const active = await this.branchRepository.count({
+      where: { deletedAt: IsNull() },
+    });
+    const deleted = await this.branchRepository.count({
+      where: { deletedAt: IsNull() },
+    });
 
     return { total, active, deleted: total - active };
   }

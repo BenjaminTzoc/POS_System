@@ -25,3 +25,8 @@ export {
   ProductResponseDto,
 } from './product.dto';
 export { CreateUnitDto, UpdateUnitDto, UnitResponseDto } from './unit.dto';
+export {
+  CreateInventoryTransferDto,
+  UpdateTransferStatusDto,
+  InventoryTransferResponseDto,
+} from './inventory-transfer.dto';

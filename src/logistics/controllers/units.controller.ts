@@ -1,35 +1,55 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { UnitService } from '../services/unit.service';
 import { CreateUnitDto, UnitResponseDto, UpdateUnitDto } from '../dto';
-import { Public } from 'src/auth/decorators';
+import { Permissions } from 'src/auth/decorators';
+import { User } from 'src/common/decorators/user.decorator';
+import { isSuperAdmin } from 'src/utils/user-scope.util';
 
 @Controller('units')
 export class UnitsController {
-  constructor(
-    private readonly unitService: UnitService,
-  ) {}
+  constructor(private readonly unitService: UnitService) {}
 
   @Post()
-  @Public()
+  @Permissions('units.manage')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateUnitDto): Promise<UnitResponseDto> {
     return this.unitService.create(dto);
   }
 
   @Get()
-  @Public()
-  findAll(): Promise<UnitResponseDto[]> {
-    return this.unitService.findAll();
+  findAll(
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<UnitResponseDto[]> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.unitService.findAll(showDeleted);
   }
 
   @Get(':id')
-  @Public()
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<UnitResponseDto> {
-    return this.unitService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<UnitResponseDto> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.unitService.findOne(id, showDeleted);
   }
 
   @Put(':id')
-  @Public()
+  @Permissions('units.manage')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUnitDto,
@@ -38,14 +58,14 @@ export class UnitsController {
   }
 
   @Delete(':id')
-  @Public()
+  @Permissions('units.manage')
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.unitService.remove(id);
   }
 
   @Patch(':id/restore')
-  @Public()
+  @Permissions('units.manage')
   @HttpCode(HttpStatus.OK)
   restore(@Param('id', ParseUUIDPipe) id: string): Promise<UnitResponseDto> {
     return this.unitService.restore(id);

@@ -9,6 +9,8 @@ import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { LogisticsModule } from './logistics/logistics.module';
 import { PurchasesModule } from './purchases/purchases.module';
 import { SalesModule } from './sales/sales.module';
+import { ReportsModule } from './reports/reports.module';
+import { FinanceModule } from './finances/finance.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { SalesModule } from './sales/sales.module';
     LogisticsModule,
     PurchasesModule,
     SalesModule,
+    ReportsModule,
+    FinanceModule,
   ],
   controllers: [],
   providers: [

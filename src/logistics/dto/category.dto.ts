@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { UnitResponseDto } from './unit.dto';
@@ -50,6 +56,6 @@ export class CategoryResponseDto extends BaseEntity {
   @Expose()
   declare updatedAt: Date;
 
-  @Exclude()
+  @Expose()
   declare deletedAt: Date | null;
 }

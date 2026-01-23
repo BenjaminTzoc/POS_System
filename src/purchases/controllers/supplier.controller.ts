@@ -1,53 +1,79 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { SupplierService } from '../services';
-import { CreateSupplierDto, SupplierResponseDto, UpdateSupplierDto } from '../dto';
-import { Public } from 'src/auth/decorators';
+import {
+  CreateSupplierDto,
+  SupplierResponseDto,
+  UpdateSupplierDto,
+} from '../dto';
+import { Permissions } from 'src/auth/decorators';
+import { User } from 'src/common/decorators/user.decorator';
+import { isSuperAdmin } from 'src/utils/user-scope.util';
 
 @Controller('suppliers')
 export class SupplierController {
-  constructor(
-    private readonly supplierService: SupplierService,
-  ) {}
+  constructor(private readonly supplierService: SupplierService) {}
 
   @Post()
-  @Public()
+  @Permissions('suppliers.manage')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateSupplierDto): Promise<SupplierResponseDto> {
     return this.supplierService.create(dto);
   }
 
   @Get()
-  @Public()
-  findAll(): Promise<SupplierResponseDto[]> {
-    return this.supplierService.findAll();
+  findAll(
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<SupplierResponseDto[]> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.supplierService.findAll(showDeleted);
   }
 
   @Get('search')
-  @Public()
-  search(@Query('q') query: string): Promise<SupplierResponseDto[]> {
-    return this.supplierService.searchSuppliers(query);
+  search(
+    @Query('q') query: string,
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<SupplierResponseDto[]> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.supplierService.searchSuppliers(query, showDeleted);
   }
 
   @Get('stats')
-  @Public()
   getStats(): Promise<{ total: number; active: number; deleted: number }> {
     return this.supplierService.getSuppliersStats();
   }
 
   @Get('nit/:nit')
-  @Public()
   findByNit(@Param('nit') nit: string): Promise<SupplierResponseDto> {
     return this.supplierService.findByNit(nit);
   }
 
   @Get(':id')
-  @Public()
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SupplierResponseDto> {
-    return this.supplierService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<SupplierResponseDto> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.supplierService.findOne(id, showDeleted);
   }
 
   @Put(':id')
-  @Public()
+  @Permissions('suppliers.manage')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSupplierDto,
@@ -56,16 +82,18 @@ export class SupplierController {
   }
 
   @Delete(':id')
-  @Public()
+  @Permissions('suppliers.manage')
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.supplierService.remove(id);
   }
 
   @Patch(':id/restore')
-  @Public()
+  @Permissions('suppliers.manage')
   @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<SupplierResponseDto> {
+  restore(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SupplierResponseDto> {
     return this.supplierService.restore(id);
   }
 }

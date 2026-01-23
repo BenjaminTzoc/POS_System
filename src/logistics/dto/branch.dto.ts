@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsNotEmpty, IsEmail, MaxLength, Matches } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  IsEmail,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 import { Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 
@@ -69,6 +76,6 @@ export class BranchResponseDto extends BaseEntity {
   @Expose()
   declare updatedAt: Date;
 
-  @Exclude()
+  @Expose()
   declare deletedAt: Date | null;
 }

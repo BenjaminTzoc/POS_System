@@ -1,41 +1,73 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { CustomerCategoryService } from '../services';
-import { CreateCustomerCategoryDto, CustomerCategoryResponseDto, UpdateCustomerCategoryDto } from '../dto';
-import { Public } from 'src/auth/decorators';
+import {
+  CreateCustomerCategoryDto,
+  CustomerCategoryResponseDto,
+  UpdateCustomerCategoryDto,
+} from '../dto';
+import { Permissions, Public } from 'src/auth/decorators';
+import { isSuperAdmin } from 'src/utils/user-scope.util';
+import { User } from 'src/common/decorators/user.decorator';
 
 @Controller('customer-categories')
 export class CustomerCategoryController {
   constructor(
-    private readonly customerCategoryService: CustomerCategoryService
+    private readonly customerCategoryService: CustomerCategoryService,
   ) {}
 
   @Post()
-  @Public()
+  @Permissions('customer-categories.manage')
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateCustomerCategoryDto): Promise<CustomerCategoryResponseDto> {
+  create(
+    @Body() dto: CreateCustomerCategoryDto,
+  ): Promise<CustomerCategoryResponseDto> {
     return this.customerCategoryService.create(dto);
   }
 
   @Get()
-  @Public()
-  findAll(): Promise<CustomerCategoryResponseDto[]> {
-    return this.customerCategoryService.findAll();
+  findAll(
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<CustomerCategoryResponseDto[]> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.customerCategoryService.findAll(showDeleted);
   }
 
   @Get('name/:name')
-  @Public()
-  findByName(@Param('name') name: string): Promise<CustomerCategoryResponseDto> {
-    return this.customerCategoryService.findByName(name);
+  findByName(
+    @Param('name') name: string,
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<CustomerCategoryResponseDto> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.customerCategoryService.findByName(name, showDeleted);
   }
 
   @Get(':id')
-  @Public()
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<CustomerCategoryResponseDto> {
-    return this.customerCategoryService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('includeDeleted') includeDeleted: string,
+    @User() user: any,
+  ): Promise<CustomerCategoryResponseDto> {
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    return this.customerCategoryService.findOne(id, showDeleted);
   }
 
   @Put(':id')
-  @Public()
+  @Permissions('customer-categories.manage')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCustomerCategoryDto,
@@ -44,16 +76,18 @@ export class CustomerCategoryController {
   }
 
   @Delete(':id')
-  @Public()
+  @Permissions('customer-categories.manage')
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.customerCategoryService.remove(id);
   }
 
   @Patch(':id/restore')
-  @Public()
+  @Permissions('customer-categories.manage')
   @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<CustomerCategoryResponseDto> {
+  restore(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CustomerCategoryResponseDto> {
     return this.customerCategoryService.restore(id);
   }
 }

@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsNotEmpty, IsNumber, IsBoolean, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  IsNumber,
+  IsBoolean,
+  Min,
+  Max,
+} from 'class-validator';
 import { Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 
@@ -74,6 +82,6 @@ export class CustomerCategoryResponseDto extends BaseEntity {
   @Expose()
   declare updatedAt: Date;
 
-  @Exclude()
+  @Expose()
   declare deletedAt: Date | null;
 }

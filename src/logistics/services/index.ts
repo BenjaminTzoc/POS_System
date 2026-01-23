@@ -5,3 +5,4 @@ export { BranchService } from './branch.service';
 export { InventoryService } from './inventory.service';
 export { InventoryMovementService } from './inventory-movement.service';
 export { FilesService } from './files.service';
+export { InventoryTransferService } from './inventory-transfer.service';

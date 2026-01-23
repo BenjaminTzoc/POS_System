@@ -1,8 +1,16 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Supplier } from '../entities';
 import { IsNull, Repository } from 'typeorm';
-import { CreateSupplierDto, SupplierResponseDto, UpdateSupplierDto } from '../dto';
+import {
+  CreateSupplierDto,
+  SupplierResponseDto,
+  UpdateSupplierDto,
+} from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -13,13 +21,18 @@ export class SupplierService {
   ) {}
 
   async create(dto: CreateSupplierDto): Promise<SupplierResponseDto> {
-    // Verificar si el NIT ya existe
+    // Verificar si el NIT ya existe (incluyendo eliminados)
     const existingNit = await this.supplierRepository.findOne({
       where: { nit: dto.nit },
-      withDeleted: false,
+      withDeleted: true,
     });
 
     if (existingNit) {
+      if (existingNit.deletedAt) {
+        throw new ConflictException(
+          `El NIT '${dto.nit}' pertenece a un proveedor inactivo. Considere reactivarlo o contacte con el administrador.`,
+        );
+      }
       throw new ConflictException(`El NIT ${dto.nit} ya está registrado`);
     }
 
@@ -28,17 +41,23 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, savedSupplier);
   }
 
-  async findAll(): Promise<SupplierResponseDto[]> {
+  async findAll(
+    includeDeleted: boolean = false,
+  ): Promise<SupplierResponseDto[]> {
     const suppliers = await this.supplierRepository.find({
-      where: { deletedAt: IsNull() },
+      withDeleted: includeDeleted,
       order: { name: 'ASC' },
     });
     return plainToInstance(SupplierResponseDto, suppliers);
   }
 
-  async findOne(id: string): Promise<SupplierResponseDto> {
+  async findOne(
+    id: string,
+    includeDeleted: boolean = false,
+  ): Promise<SupplierResponseDto> {
     const supplier = await this.supplierRepository.findOne({
-      where: { id, deletedAt: IsNull() },
+      where: { id },
+      withDeleted: includeDeleted,
     });
 
     if (!supplier) {
@@ -60,7 +79,10 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, supplier);
   }
 
-  async update(id: string, dto: UpdateSupplierDto): Promise<SupplierResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateSupplierDto,
+  ): Promise<SupplierResponseDto> {
     const supplier = await this.supplierRepository.findOne({
       where: { id, deletedAt: IsNull() },
     });
@@ -69,13 +91,19 @@ export class SupplierService {
       throw new NotFoundException(`Proveedor con ID ${id} no encontrado`);
     }
 
-    // Verificar si el nuevo NIT ya existe
+    // Verificar si el nuevo NIT ya existe (incluyendo eliminados)
     if (dto.nit && dto.nit !== supplier.nit) {
       const existingNit = await this.supplierRepository.findOne({
-        where: { nit: dto.nit, deletedAt: IsNull() },
+        where: { nit: dto.nit },
+        withDeleted: true,
       });
 
       if (existingNit) {
+        if (existingNit.deletedAt) {
+          throw new ConflictException(
+            `El NIT '${dto.nit}' pertenece a un proveedor inactivo. Considere reactivarlo o contacte con el administrador.`,
+          );
+        }
         throw new ConflictException(`El NIT ${dto.nit} ya está registrado`);
       }
     }
@@ -117,7 +145,9 @@ export class SupplierService {
     }
 
     if (!supplier.deletedAt) {
-      throw new ConflictException(`El proveedor con ID ${id} no está eliminado`);
+      throw new ConflictException(
+        `El proveedor con ID ${id} no está eliminado`,
+      );
     }
 
     supplier.deletedAt = null;
@@ -125,10 +155,19 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, restoredSupplier);
   }
 
-  async searchSuppliers(query: string): Promise<SupplierResponseDto[]> {
-    const suppliers = await this.supplierRepository
-      .createQueryBuilder('supplier')
-      .where('supplier.deletedAt IS NULL')
+  async searchSuppliers(
+    query: string,
+    includeDeleted: boolean = false,
+  ): Promise<SupplierResponseDto[]> {
+    const queryBuilder = this.supplierRepository.createQueryBuilder('supplier');
+
+    if (!includeDeleted) {
+      queryBuilder.where('supplier.deletedAt IS NULL');
+    } else {
+      queryBuilder.withDeleted();
+    }
+
+    const suppliers = await queryBuilder
       .andWhere(
         '(supplier.name ILIKE :query OR supplier.nit ILIKE :query OR supplier.contactName ILIKE :query OR supplier.email ILIKE :query)',
         { query: `%${query}%` },
@@ -139,9 +178,15 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, suppliers);
   }
 
-  async getSuppliersStats(): Promise<{ total: number; active: number; deleted: number }> {
+  async getSuppliersStats(): Promise<{
+    total: number;
+    active: number;
+    deleted: number;
+  }> {
     const total = await this.supplierRepository.count();
-    const active = await this.supplierRepository.count({ where: { deletedAt: IsNull() } });
+    const active = await this.supplierRepository.count({
+      where: { deletedAt: IsNull() },
+    });
     const deleted = total - active;
 
     return { total, active, deleted };

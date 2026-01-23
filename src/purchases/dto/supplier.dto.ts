@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsNotEmpty, MaxLength, Matches, IsEmail } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  MaxLength,
+  Matches,
+  IsEmail,
+} from 'class-validator';
 import { Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 
@@ -11,7 +18,9 @@ export class CreateSupplierDto {
   @IsNotEmpty()
   @IsString()
   @MaxLength(20)
-  @Matches(/^[0-9]+-[0-9Kk]$/, { message: 'El NIT debe tener un formato válido' })
+  @Matches(/^[0-9]+-[0-9Kk]$/, {
+    message: 'El NIT debe tener un formato válido',
+  })
   nit: string;
 
   @IsOptional()
@@ -55,7 +64,9 @@ export class UpdateSupplierDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
-  @Matches(/^[0-9]+-[0-9Kk]$/, { message: 'El NIT debe tener un formato válido' })
+  @Matches(/^[0-9]+-[0-9Kk]$/, {
+    message: 'El NIT debe tener un formato válido',
+  })
   nit?: string;
 
   @IsOptional()
@@ -121,6 +132,6 @@ export class SupplierResponseDto extends BaseEntity {
   @Expose()
   declare updatedAt: Date;
 
-  @Exclude()
+  @Expose()
   declare deletedAt: Date | null;
 }

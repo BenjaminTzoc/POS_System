@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Unit } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -13,24 +17,36 @@ export class UnitService {
   ) {}
 
   async create(dto: CreateUnitDto): Promise<UnitResponseDto> {
-    // Verificar si la unidad ya existe por nombre
+    // Verificar si la unidad ya existe (incluyendo eliminadas)
     const existingUnit = await this.unitRepository.findOne({
       where: { name: dto.name },
-      withDeleted: false,
+      withDeleted: true,
     });
 
     if (existingUnit) {
+      if (existingUnit.deletedAt) {
+        throw new ConflictException(
+          `La unidad '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`,
+        );
+      }
       throw new ConflictException(`La unidad '${dto.name}' ya existe`);
     }
 
-    // Verificar si la abreviatura ya existe
+    // Verificar si la abreviatura ya existe (incluyendo eliminadas)
     const existingAbbreviation = await this.unitRepository.findOne({
       where: { abbreviation: dto.abbreviation },
-      withDeleted: false,
+      withDeleted: true,
     });
 
     if (existingAbbreviation) {
-      throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya está en uso`);
+      if (existingAbbreviation.deletedAt) {
+        throw new ConflictException(
+          `La abreviatura '${dto.abbreviation}' ya existe en una unidad inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`,
+        );
+      }
+      throw new ConflictException(
+        `La abreviatura '${dto.abbreviation}' ya está en uso`,
+      );
     }
 
     const unit = this.unitRepository.create(dto);
@@ -38,17 +54,21 @@ export class UnitService {
     return plainToInstance(UnitResponseDto, savedUnit);
   }
 
-  async findAll(): Promise<UnitResponseDto[]> {
+  async findAll(includeDeleted: boolean = false): Promise<UnitResponseDto[]> {
     const units = await this.unitRepository.find({
-      where: { deletedAt: IsNull() },
+      withDeleted: includeDeleted,
       order: { name: 'ASC' },
     });
     return plainToInstance(UnitResponseDto, units);
   }
 
-  async findOne(id: string): Promise<UnitResponseDto> {
+  async findOne(
+    id: string,
+    includeDeleted: boolean = false,
+  ): Promise<UnitResponseDto> {
     const unit = await this.unitRepository.findOne({
-      where: { id, deletedAt: IsNull() },
+      where: { id },
+      withDeleted: includeDeleted,
     });
 
     if (!unit) {
@@ -67,25 +87,39 @@ export class UnitService {
       throw new NotFoundException(`Unidad con ID ${id} no encontrada`);
     }
 
-    // Verificar si el nuevo nombre ya existe
+    // Verificar si el nuevo nombre ya existe (incluyendo eliminadas)
     if (dto.name && dto.name !== unit.name) {
       const existingUnit = await this.unitRepository.findOne({
-        where: { name: dto.name, deletedAt: IsNull() },
+        where: { name: dto.name },
+        withDeleted: true,
       });
 
       if (existingUnit) {
+        if (existingUnit.deletedAt) {
+          throw new ConflictException(
+            `No se puede usar el nombre '${dto.name}' porque pertenece a una unidad inactiva. Considere reactivarla o contacte con el administrador.`,
+          );
+        }
         throw new ConflictException(`La unidad '${dto.name}' ya existe`);
       }
     }
 
-    // Verificar si la nueva abreviatura ya existe
+    // Verificar si la nueva abreviatura ya existe (incluyendo eliminadas)
     if (dto.abbreviation && dto.abbreviation !== unit.abbreviation) {
       const existingAbbreviation = await this.unitRepository.findOne({
-        where: { abbreviation: dto.abbreviation, deletedAt: IsNull() },
+        where: { abbreviation: dto.abbreviation },
+        withDeleted: true,
       });
 
       if (existingAbbreviation) {
-        throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya está en uso`);
+        if (existingAbbreviation.deletedAt) {
+          throw new ConflictException(
+            `La abreviatura '${dto.abbreviation}' ya pertenece a una unidad inactiva.`,
+          );
+        }
+        throw new ConflictException(
+          `La abreviatura '${dto.abbreviation}' ya está en uso`,
+        );
       }
     }
 
@@ -153,6 +187,4 @@ export class UnitService {
     const restoredUnit = await this.unitRepository.save(unit);
     return plainToInstance(UnitResponseDto, restoredUnit);
   }
-
-  
 }

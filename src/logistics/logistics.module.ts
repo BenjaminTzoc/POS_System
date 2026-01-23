@@ -7,12 +7,15 @@ import {
   InventoryMovement,
   Product,
   Unit,
+  InventoryTransfer,
+  InventoryTransferItem,
 } from './entities';
 import {
   BranchController,
   CategoryController,
   InventoryController,
   InventoryMovementController,
+  InventoryTransferController,
   ProductController,
   UnitsController,
 } from './controllers';
@@ -22,6 +25,7 @@ import {
   FilesService,
   InventoryMovementService,
   InventoryService,
+  InventoryTransferService,
   ProductService,
   UnitService,
 } from './services';
@@ -36,8 +40,10 @@ import { AuthModule } from 'src/auth/auth.module';
       Branch,
       Inventory,
       InventoryMovement,
-      AuthModule,
+      InventoryTransfer,
+      InventoryTransferItem,
     ]),
+    AuthModule,
   ],
   controllers: [
     UnitsController,
@@ -46,6 +52,7 @@ import { AuthModule } from 'src/auth/auth.module';
     BranchController,
     InventoryController,
     InventoryMovementController,
+    InventoryTransferController,
   ],
   providers: [
     UnitService,
@@ -55,6 +62,7 @@ import { AuthModule } from 'src/auth/auth.module';
     InventoryService,
     InventoryMovementService,
     FilesService,
+    InventoryTransferService,
   ],
   exports: [
     UnitService,
@@ -64,6 +72,7 @@ import { AuthModule } from 'src/auth/auth.module';
     InventoryService,
     InventoryMovementService,
     FilesService,
+    InventoryTransferService,
   ],
 })
 export class LogisticsModule {}
