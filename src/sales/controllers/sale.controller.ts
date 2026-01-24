@@ -139,4 +139,12 @@ export class SaleController {
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.saleService.remove(id);
   }
+
+  @Post(':id/send-email')
+  @HttpCode(HttpStatus.OK)
+  sendEmail(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ message: string }> {
+    return this.saleService.sendSaleEmail(id);
+  }
 }

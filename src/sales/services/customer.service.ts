@@ -63,18 +63,25 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, savedCustomer);
   }
 
-  async findAll(): Promise<CustomerResponseDto[]> {
+  async findAll(
+    includeDeleted: boolean = false,
+  ): Promise<CustomerResponseDto[]> {
     const customers = await this.customerRepository.find({
-      where: { deletedAt: IsNull() },
+      where: includeDeleted ? {} : { deletedAt: IsNull() },
+      withDeleted: includeDeleted,
       relations: ['category'],
       order: { name: 'ASC' },
     });
     return plainToInstance(CustomerResponseDto, customers);
   }
 
-  async findOne(id: string): Promise<CustomerResponseDto> {
+  async findOne(
+    id: string,
+    includeDeleted: boolean = false,
+  ): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
-      where: { id, deletedAt: IsNull() },
+      where: { id, deletedAt: includeDeleted ? undefined : IsNull() },
+      withDeleted: includeDeleted,
       relations: ['category'],
     });
 
@@ -85,9 +92,13 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customer);
   }
 
-  async findByNit(nit: string): Promise<CustomerResponseDto> {
+  async findByNit(
+    nit: string,
+    includeDeleted: boolean = false,
+  ): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
-      where: { nit, deletedAt: IsNull() },
+      where: { nit, deletedAt: includeDeleted ? undefined : IsNull() },
+      withDeleted: includeDeleted,
       relations: ['category'],
     });
 
@@ -98,12 +109,16 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customer);
   }
 
-  async findByCategory(categoryId: string): Promise<CustomerResponseDto[]> {
+  async findByCategory(
+    categoryId: string,
+    includeDeleted: boolean = false,
+  ): Promise<CustomerResponseDto[]> {
     const customers = await this.customerRepository.find({
       where: {
         category: { id: categoryId },
-        deletedAt: IsNull(),
+        deletedAt: includeDeleted ? undefined : IsNull(),
       },
+      withDeleted: includeDeleted,
       relations: ['category'],
       order: { name: 'ASC' },
     });
@@ -207,17 +222,25 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, restoredCustomer);
   }
 
-  async searchCustomers(query: string): Promise<CustomerResponseDto[]> {
-    const customers = await this.customerRepository
+  async searchCustomers(
+    query: string,
+    includeDeleted: boolean = false,
+  ): Promise<CustomerResponseDto[]> {
+    const queryBuilder = this.customerRepository
       .createQueryBuilder('customer')
       .leftJoinAndSelect('customer.category', 'category')
-      .where('customer.deletedAt IS NULL')
+      .where(includeDeleted ? '1=1' : 'customer.deletedAt IS NULL')
       .andWhere(
         '(customer.name ILIKE :query OR customer.nit ILIKE :query OR customer.contactName ILIKE :query OR customer.email ILIKE :query)',
         { query: `%${query}%` },
       )
-      .orderBy('customer.name', 'ASC')
-      .getMany();
+      .orderBy('customer.name', 'ASC');
+
+    if (includeDeleted) {
+      queryBuilder.withDeleted();
+    }
+
+    const customers = await queryBuilder.getMany();
 
     return plainToInstance(CustomerResponseDto, customers);
   }

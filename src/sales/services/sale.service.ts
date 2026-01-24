@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -24,6 +25,8 @@ import {
 } from 'src/logistics/entities';
 import { SaleGateway } from '../gateway/sale.gateway';
 import { SaleDiscount } from '../entities/sale-discount.entity';
+import { MailService } from 'src/common/mail/mail.service';
+import { PdfService } from 'src/common/pdf/pdf.service';
 
 @Injectable()
 export class SaleService {
@@ -42,6 +45,8 @@ export class SaleService {
     private readonly inventoryMovementService: InventoryMovementService,
     private readonly dataSource: DataSource,
     private readonly saleGateway: SaleGateway,
+    private readonly mailService: MailService,
+    private readonly pdfService: PdfService,
   ) {}
 
   async create(dto: CreateSaleDto): Promise<SaleResponseDto> {
@@ -914,5 +919,54 @@ export class SaleService {
     this.saleGateway.broadcastNextInvoiceNumber(nextNumber);
 
     return { nextNumber };
+  }
+
+  async sendSaleEmail(id: string): Promise<{ message: string }> {
+    const sale = await this.saleRepository.findOne({
+      where: { id },
+      relations: [
+        'customer',
+        'details',
+        'details.product',
+        'branch',
+        'payments',
+        'payments.paymentMethod',
+      ],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    const email = sale.customer?.email || sale.guestCustomer?.email;
+
+    if (!email) {
+      throw new BadRequestException(
+        'La venta no tiene un correo electrónico asociado',
+      );
+    }
+
+    try {
+      // 1. Generar PDF
+      const pdfBuffer = await this.pdfService.generateInvoicePdf(sale);
+
+      // 2. Enviar correo
+      const subject = `Factura ${sale.invoiceNumber} - Sistema POS`;
+      const text = `Hola ${sale.customer?.name || sale.guestCustomer?.name},\n\nAdjunto encontrarás la factura de tu compra correspondiente al número ${sale.invoiceNumber}.\n\nGracias por tu preferencia.`;
+
+      await this.mailService.sendMail(email, subject, text, [
+        {
+          filename: `Factura_${sale.invoiceNumber}.pdf`,
+          content: pdfBuffer,
+        },
+      ]);
+
+      return { message: 'Correo enviado exitosamente' };
+    } catch (error) {
+      console.error('Error in sendSaleEmail:', error);
+      throw new InternalServerErrorException(
+        'Ocurrió un error al procesar o enviar el correo electrónico',
+      );
+    }
   }
 }

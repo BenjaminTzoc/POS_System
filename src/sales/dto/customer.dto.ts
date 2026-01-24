@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsEmail, IsNumber, Min, IsDateString, Matches } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNotEmpty,
+  IsUUID,
+  IsEmail,
+  IsNumber,
+  Min,
+  IsDateString,
+  Matches,
+} from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { CustomerCategoryResponseDto } from '.';
@@ -10,7 +20,9 @@ export class CreateCustomerDto {
 
   @IsNotEmpty()
   @IsString()
-  @Matches(/^[0-9]+-[0-9Kk]?$/, { message: 'El NIT debe tener un formato válido' })
+  @Matches(/^[0-9]+-[0-9Kk]?$/, {
+    message: 'El NIT debe tener un formato válido',
+  })
   nit: string;
 
   @IsOptional()
@@ -53,7 +65,9 @@ export class UpdateCustomerDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^[0-9]+-[0-9Kk]?$/, { message: 'El NIT debe tener un formato válido' })
+  @Matches(/^[0-9]+-[0-9Kk]?$/, {
+    message: 'El NIT debe tener un formato válido',
+  })
   nit?: string;
 
   @IsOptional()
@@ -130,6 +144,6 @@ export class CustomerResponseDto extends BaseEntity {
   @Expose()
   declare updatedAt: Date;
 
-  @Exclude()
+  @Expose()
   declare deletedAt: Date | null;
 }

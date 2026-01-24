@@ -138,7 +138,10 @@ export class ProductService {
     });
   }
 
-  async findAll(branchId?: string): Promise<ProductResponseDto[]> {
+  async findAll(
+    branchId?: string,
+    includeDeleted: boolean = false,
+  ): Promise<ProductResponseDto[]> {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -146,7 +149,11 @@ export class ProductService {
       .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
       .leftJoinAndSelect('product.inventories', 'inventories')
       .leftJoinAndSelect('inventories.branch', 'branch')
-      .where('product.deletedAt IS NULL');
+      .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
+
+    if (includeDeleted) {
+      query.withDeleted();
+    }
 
     if (branchId !== undefined) {
       query.andWhere('branch.id = :branchId', { branchId });
@@ -173,7 +180,11 @@ export class ProductService {
     );
   }
 
-  async findOne(id: string, branchId?: string): Promise<ProductResponseDto> {
+  async findOne(
+    id: string,
+    branchId?: string,
+    includeDeleted: boolean = false,
+  ): Promise<ProductResponseDto> {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -182,7 +193,11 @@ export class ProductService {
       .leftJoinAndSelect('product.inventories', 'inventories')
       .leftJoinAndSelect('inventories.branch', 'branch')
       .where('product.id = :productId', { productId: id })
-      .andWhere('product.deletedAt IS NULL');
+      .andWhere(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
+
+    if (includeDeleted) {
+      query.withDeleted();
+    }
 
     if (branchId !== undefined) {
       query.andWhere('branch.id = :branchId', { branchId });
@@ -420,17 +435,22 @@ export class ProductService {
   async searchProducts(
     query: string,
     branchId?: string,
+    includeDeleted: boolean = false,
   ): Promise<ProductResponseDto[]> {
     const queryBuilder = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.unit', 'unit')
       .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
-      .where('product.deletedAt IS NULL')
+      .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL')
       .andWhere(
         '(product.name ILIKE :query OR product.sku ILIKE :query OR product.barcode ILIKE :query OR product.description ILIKE :query)',
         { query: `%${query}%` },
       );
+
+    if (includeDeleted) {
+      queryBuilder.withDeleted();
+    }
 
     if (branchId) {
       // Si hay branchId, usamos INNER JOIN para traer SOLO productos que existan en esa sucursal

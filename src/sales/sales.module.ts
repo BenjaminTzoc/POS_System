@@ -28,6 +28,8 @@ import { LogisticsModule } from 'src/logistics/logistics.module';
 import { PurchasesModule } from 'src/purchases/purchases.module';
 import { SaleGateway } from './gateway/sale.gateway';
 import { Branch } from 'src/logistics/entities';
+import { MailModule } from 'src/common/mail/mail.module';
+import { PdfModule } from 'src/common/pdf/pdf.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { Branch } from 'src/logistics/entities';
     ]),
     LogisticsModule,
     PurchasesModule,
+    MailModule,
+    PdfModule,
   ],
   controllers: [
     CustomerCategoryController,

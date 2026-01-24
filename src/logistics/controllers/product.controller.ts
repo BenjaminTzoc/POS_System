@@ -46,8 +46,12 @@ export class ProductController {
 
   @Get()
   @Permissions('products.manage')
-  async findAll(@Req() req): Promise<ProductResponseDto[]> {
+  async findAll(
+    @Req() req,
+    @Query('includeDeleted') includeDeleted: string,
+  ): Promise<ProductResponseDto[]> {
     const user = req.user;
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
     const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
 
@@ -55,16 +59,18 @@ export class ProductController {
       throw new ForbiddenException('Usuario sin sucursal asignada');
     }
 
-    return this.productService.findAll(branchId);
+    return this.productService.findAll(branchId, showDeleted);
   }
 
   @Get('search')
   async search(
     @Query('q') query: string,
     @Query('branchId') branchIdParam: string,
+    @Query('includeDeleted') includeDeleted: string,
     @Req() req,
   ): Promise<ProductResponseDto[]> {
     const user = req.user;
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
     // Si es SuperAdmin, puede filtrar por la sucursal que quiera (o null para global)
     // Si NO es SuperAdmin, se fuerza su sucursal asignada
@@ -74,7 +80,7 @@ export class ProductController {
       throw new ForbiddenException('Usuario sin sucursal asignada');
     }
 
-    return this.productService.searchProducts(query, branchId);
+    return this.productService.searchProducts(query, branchId, showDeleted);
   }
 
   @Get('top-selling')
@@ -110,9 +116,11 @@ export class ProductController {
   @Permissions('products.manage')
   findOne(
     @Param('id', ParseUUIDPipe) id: string,
+    @Query('includeDeleted') includeDeleted: string,
     @Req() req,
   ): Promise<ProductResponseDto> {
     const user = req.user;
+    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
     const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
 
@@ -120,7 +128,7 @@ export class ProductController {
       throw new ForbiddenException('Usuario sin sucursal asignada');
     }
 
-    return this.productService.findOne(id, branchId);
+    return this.productService.findOne(id, branchId, showDeleted);
   }
 
   @Put(':id')

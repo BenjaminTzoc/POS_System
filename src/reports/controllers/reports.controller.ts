@@ -82,4 +82,60 @@ export class ReportsController {
 
     return this.reportsService.getSalesByPaymentMethod(branchId, sDate, eDate);
   }
+
+  @Get('sales/hourly')
+  async getHourlySales(
+    @User() user: any,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('branchId') branchIdQuery?: string,
+  ): Promise<any[]> {
+    const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
+    const sDate = startDate ? new Date(startDate) : undefined;
+    const eDate = endDate ? new Date(endDate) : undefined;
+
+    return this.reportsService.getHourlySalesDistribution(
+      branchId,
+      sDate,
+      eDate,
+    );
+  }
+
+  @Get('sales/weekday')
+  async getSalesByWeekday(
+    @User() user: any,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('branchId') branchIdQuery?: string,
+  ): Promise<any[]> {
+    const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
+    const sDate = startDate ? new Date(startDate) : undefined;
+    const eDate = endDate ? new Date(endDate) : undefined;
+
+    return this.reportsService.getSalesByWeekday(branchId, sDate, eDate);
+  }
+
+  @Get('inventory/movements')
+  async getInventoryMovementTrends(
+    @User() user: any,
+    @Query('days') days?: string,
+    @Query('branchId') branchIdQuery?: string,
+  ): Promise<any[]> {
+    const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
+    const numDays = days ? parseInt(days, 10) : 30;
+
+    return this.reportsService.getInventoryMovementTrends(branchId, numDays);
+  }
+
+  @Get('financial/profit')
+  async getProfitabilityTrends(
+    @User() user: any,
+    @Query('days') days?: string,
+    @Query('branchId') branchIdQuery?: string,
+  ): Promise<any[]> {
+    const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
+    const numDays = days ? parseInt(days, 10) : 30;
+
+    return this.reportsService.getProfitabilityTrends(branchId, numDays);
+  }
 }
