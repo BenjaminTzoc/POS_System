@@ -16,6 +16,9 @@ export class CustomerCategory extends BaseEntity {
   @Column({ name: 'min_purchase_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
   minPurchaseAmount: number;
 
+  @Column({ name: 'default_credit_limit', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  defaultCreditLimit: number;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

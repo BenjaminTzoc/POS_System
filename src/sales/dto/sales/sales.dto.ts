@@ -1,16 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import {
-  IsArray,
-  IsBoolean,
-  IsDateString,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
 import { SaleStatus } from 'src/sales/entities';
 import { CreateSaleDetailDto, GuestCustomerDto } from '..';
 import { CreateSaleDiscountDto } from '../sale-discounts/create-sale-discount.dto';
@@ -77,6 +66,4 @@ export class CreateSaleDto {
   discounts?: CreateSaleDiscountDto[];
 }
 
-export class UpdateSaleDto extends PartialType(
-  OmitType(CreateSaleDto, ['status'] as const),
-) {}
+export class UpdateSaleDto extends PartialType(OmitType(CreateSaleDto, ['status'] as const)) {}

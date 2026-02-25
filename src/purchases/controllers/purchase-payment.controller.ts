@@ -5,9 +5,7 @@ import { Public } from 'src/auth/decorators';
 
 @Controller('purchase-payments')
 export class PurchasePaymentController {
-  constructor(
-    private readonly purchasePaymentService: PurchasePaymentService,
-  ) {}
+  constructor(private readonly purchasePaymentService: PurchasePaymentService) {}
 
   @Post()
   @Public()
@@ -42,10 +40,7 @@ export class PurchasePaymentController {
 
   @Get('date-range')
   @Public()
-  findByDateRange(
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string,
-  ): Promise<PurchasePaymentResponseDto[]> {
+  findByDateRange(@Query('startDate') startDate: string, @Query('endDate') endDate: string): Promise<PurchasePaymentResponseDto[]> {
     return this.purchasePaymentService.findByDateRange(startDate, endDate);
   }
 
@@ -69,10 +64,7 @@ export class PurchasePaymentController {
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdatePurchasePaymentDto,
-  ): Promise<PurchasePaymentResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePurchasePaymentDto): Promise<PurchasePaymentResponseDto> {
     return this.purchasePaymentService.update(id, dto);
   }
 

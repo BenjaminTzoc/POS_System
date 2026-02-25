@@ -1,23 +1,10 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Inventory, InventoryMovement } from '../entities';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { BranchService, InventoryService, ProductService } from '.';
-import {
-  CreateInventoryMovementDto,
-  InventoryMovementResponseDto,
-  UpdateInventoryMovementDto,
-} from '../dto';
-import {
-  MovementStatus,
-  MovementType,
-  MovementConcept,
-} from '../entities/inventory-movement.entity';
+import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto } from '../dto';
+import { MovementStatus, MovementType, MovementConcept } from '../entities/inventory-movement.entity';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -31,74 +18,40 @@ export class InventoryMovementService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async create(
-    dto: CreateInventoryMovementDto,
-    userId?: string,
-    isInternal: boolean = false,
-  ): Promise<InventoryMovementResponseDto> {
-    // Validar que ventas, compras y transferencias no se generen manualmente
-    if (
-      !isInternal &&
-      (dto.concept === MovementConcept.SALE ||
-        dto.concept === MovementConcept.PURCHASE ||
-        dto.concept === MovementConcept.TRANSFER)
-    ) {
-      throw new BadRequestException(
-        'Los movimientos de venta, compra y transferencia no pueden crearse manualmente. Utilice los módulos correspondientes.',
-      );
+  async create(dto: CreateInventoryMovementDto, userId?: string, isInternal: boolean = false): Promise<InventoryMovementResponseDto> {
+    if (!isInternal && (dto.concept === MovementConcept.SALE || dto.concept === MovementConcept.PURCHASE || dto.concept === MovementConcept.TRANSFER)) {
+      throw new BadRequestException('Los movimientos de venta, compra y transferencia no pueden crearse manualmente. Utilice los módulos correspondientes.');
     }
 
-    // Validaciones de integridad según el concepto
-    if (
-      dto.concept === MovementConcept.WASTE &&
-      dto.type !== MovementType.OUT
-    ) {
-      throw new BadRequestException(
-        'Los movimientos de merma (WASTE) deben ser de tipo salida (OUT).',
-      );
+    if (dto.concept === MovementConcept.WASTE && dto.type !== MovementType.OUT) {
+      throw new BadRequestException('Los movimientos de merma (WASTE) deben ser de tipo salida (OUT).');
     }
 
-    // Validar que el producto existe
     let product;
     try {
       product = await this.productService.findOne(dto.productId);
     } catch (error) {
-      throw new BadRequestException(
-        `El producto con ID ${dto.productId} no existe`,
-      );
+      throw new BadRequestException(`El producto con ID ${dto.productId} no existe`);
     }
 
-    // Validar que la sucursal existe
     let branch;
     try {
       branch = await this.branchService.findOne(dto.branchId);
     } catch (error) {
-      throw new BadRequestException(
-        `La sucursal con ID ${dto.branchId} no existe`,
-      );
+      throw new BadRequestException(`La sucursal con ID ${dto.branchId} no existe`);
     }
 
-    // Validar inventoryId si se proporciona o buscarlo por producto/sucursal
     let inventory: any = null;
     if (dto.inventoryId) {
       try {
         inventory = await this.inventoryService.findOne(dto.inventoryId);
-        // Verificar que el inventory pertenece al producto y sucursal
-        if (
-          inventory.product.id !== dto.productId ||
-          inventory.branch.id !== dto.branchId
-        ) {
-          throw new BadRequestException(
-            'El inventory no corresponde al producto y sucursal especificados',
-          );
+        if (inventory.product.id !== dto.productId || inventory.branch.id !== dto.branchId) {
+          throw new BadRequestException('El inventory no corresponde al producto y sucursal especificados');
         }
       } catch (error) {
-        throw new BadRequestException(
-          `El inventory con ID ${dto.inventoryId} no existe`,
-        );
+        throw new BadRequestException(`El inventory con ID ${dto.inventoryId} no existe`);
       }
     } else {
-      // Intentar buscar el inventario existente para vincularlo automáticamente
       inventory = await this.dataSource.getRepository(Inventory).findOne({
         where: {
           product: { id: dto.productId },
@@ -109,39 +62,25 @@ export class InventoryMovementService {
     }
 
     let sourceBranch, targetBranch;
-    // Validar sucursales de origen y destino para transferencias
-    if (
-      dto.type === MovementType.TRANSFER_OUT ||
-      dto.type === MovementType.TRANSFER_IN
-    ) {
+    if (dto.type === MovementType.TRANSFER_OUT || dto.type === MovementType.TRANSFER_IN) {
       if (!dto.sourceBranchId || !dto.targetBranchId) {
-        throw new BadRequestException(
-          'Las transferencias requieren sourceBranchId y targetBranchId',
-        );
+        throw new BadRequestException('Las transferencias requieren sourceBranchId y targetBranchId');
       }
 
       if (dto.sourceBranchId === dto.targetBranchId) {
-        throw new BadRequestException(
-          'Las sucursales de origen y destino no pueden ser las mismas',
-        );
+        throw new BadRequestException('Las sucursales de origen y destino no pueden ser las mismas');
       }
 
-      // Validar sucursal origen
       try {
         sourceBranch = await this.branchService.findOne(dto.sourceBranchId);
       } catch (error) {
-        throw new BadRequestException(
-          `La sucursal origen con ID ${dto.sourceBranchId} no existe`,
-        );
+        throw new BadRequestException(`La sucursal origen con ID ${dto.sourceBranchId} no existe`);
       }
 
-      // Validar sucursal destino
       try {
         targetBranch = await this.branchService.findOne(dto.targetBranchId);
       } catch (error) {
-        throw new BadRequestException(
-          `La sucursal destino con ID ${dto.targetBranchId} no existe`,
-        );
+        throw new BadRequestException(`La sucursal destino con ID ${dto.targetBranchId} no existe`);
       }
     }
 
@@ -162,14 +101,11 @@ export class InventoryMovementService {
       notes: dto.notes,
       movementDate: dto.movementDate ? new Date(dto.movementDate) : new Date(),
       unitCost: dto.unitCost || product.cost,
-      totalCost:
-        dto.totalCost ||
-        (dto.unitCost ? dto.unitCost * quantity : product.cost * quantity),
+      totalCost: dto.totalCost || (dto.unitCost ? dto.unitCost * quantity : product.cost * quantity),
     });
 
     const savedMovement = await this.movementRepository.save(movement);
 
-    // Si el movimiento está completado, actualizar el inventario
     if (savedMovement.status === MovementStatus.COMPLETED) {
       await this.updateInventory(savedMovement);
     }
@@ -180,15 +116,7 @@ export class InventoryMovementService {
   async findAll(): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
       where: { deletedAt: IsNull() },
-      relations: [
-        'product',
-        'product.category',
-        'product.unit',
-        'branch',
-        'inventory',
-        'sourceBranch',
-        'targetBranch',
-      ],
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
       order: { movementDate: 'DESC', createdAt: 'DESC' },
     });
     return plainToInstance(InventoryMovementResponseDto, movements);
@@ -197,15 +125,7 @@ export class InventoryMovementService {
   async findOne(id: string): Promise<InventoryMovementResponseDto> {
     const movement = await this.movementRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: [
-        'product',
-        'product.category',
-        'product.unit',
-        'branch',
-        'inventory',
-        'sourceBranch',
-        'targetBranch',
-      ],
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
     });
 
     if (!movement) {
@@ -215,76 +135,43 @@ export class InventoryMovementService {
     return plainToInstance(InventoryMovementResponseDto, movement);
   }
 
-  async findByProduct(
-    productId: string,
-  ): Promise<InventoryMovementResponseDto[]> {
+  async findByProduct(productId: string): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
       where: {
         product: { id: productId },
         deletedAt: IsNull(),
       },
-      relations: [
-        'product',
-        'product.category',
-        'product.unit',
-        'branch',
-        'inventory',
-        'sourceBranch',
-        'targetBranch',
-      ],
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
       order: { movementDate: 'DESC' },
     });
     return plainToInstance(InventoryMovementResponseDto, movements);
   }
 
-  async findByBranch(
-    branchId: string,
-  ): Promise<InventoryMovementResponseDto[]> {
+  async findByBranch(branchId: string): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
       where: {
         branch: { id: branchId },
         deletedAt: IsNull(),
       },
-      relations: [
-        'product',
-        'product.category',
-        'product.unit',
-        'branch',
-        'inventory',
-        'sourceBranch',
-        'targetBranch',
-      ],
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
       order: { movementDate: 'DESC' },
     });
     return plainToInstance(InventoryMovementResponseDto, movements);
   }
 
-  async findByType(
-    type: MovementType,
-  ): Promise<InventoryMovementResponseDto[]> {
+  async findByType(type: MovementType): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
       where: {
         type,
         deletedAt: IsNull(),
       },
-      relations: [
-        'product',
-        'product.category',
-        'product.unit',
-        'branch',
-        'inventory',
-        'sourceBranch',
-        'targetBranch',
-      ],
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
       order: { movementDate: 'DESC' },
     });
     return plainToInstance(InventoryMovementResponseDto, movements);
   }
 
-  async update(
-    id: string,
-    dto: UpdateInventoryMovementDto,
-  ): Promise<InventoryMovementResponseDto> {
+  async update(id: string, dto: UpdateInventoryMovementDto): Promise<InventoryMovementResponseDto> {
     const movement = await this.movementRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['product', 'branch', 'inventory'],
@@ -299,47 +186,30 @@ export class InventoryMovementService {
     Object.assign(movement, {
       status: dto.status ?? movement.status,
       notes: dto.notes ?? movement.notes,
-      movementDate: dto.movementDate
-        ? new Date(dto.movementDate)
-        : movement.movementDate,
-      completedAt: dto.completedAt
-        ? new Date(dto.completedAt)
-        : movement.completedAt,
+      movementDate: dto.movementDate ? new Date(dto.movementDate) : movement.movementDate,
+      completedAt: dto.completedAt ? new Date(dto.completedAt) : movement.completedAt,
       unitCost: dto.unitCost ?? movement.unitCost,
       totalCost: dto.totalCost ?? movement.totalCost,
     });
 
-    if (
-      previousStatus !== MovementStatus.COMPLETED &&
-      movement.status === MovementStatus.COMPLETED
-    ) {
+    if (previousStatus !== MovementStatus.COMPLETED && movement.status === MovementStatus.COMPLETED) {
       movement.completedAt = new Date();
     }
 
-    if (
-      previousStatus !== MovementStatus.CANCELLED &&
-      movement.status === MovementStatus.CANCELLED
-    ) {
+    if (previousStatus !== MovementStatus.CANCELLED && movement.status === MovementStatus.CANCELLED) {
       movement.cancelledAt = new Date();
     }
 
     const updatedMovement = await this.movementRepository.save(movement);
 
-    // Si el estado cambió a COMPLETED, actualizar inventario
-    if (
-      previousStatus !== MovementStatus.COMPLETED &&
-      updatedMovement.status === MovementStatus.COMPLETED
-    ) {
+    if (previousStatus !== MovementStatus.COMPLETED && updatedMovement.status === MovementStatus.COMPLETED) {
       await this.updateInventory(updatedMovement);
     }
 
     return this.findOne(id);
   }
 
-  async completeMovement(
-    id: string,
-    userId?: string,
-  ): Promise<InventoryMovementResponseDto> {
+  async completeMovement(id: string, userId?: string): Promise<InventoryMovementResponseDto> {
     const movement = await this.movementRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['product', 'branch', 'inventory'],
@@ -363,11 +233,7 @@ export class InventoryMovementService {
     return this.findOne(id);
   }
 
-  async cancelMovement(
-    id: string,
-    userId?: string,
-    reason?: string,
-  ): Promise<InventoryMovementResponseDto> {
+  async cancelMovement(id: string, userId?: string, reason?: string): Promise<InventoryMovementResponseDto> {
     const movement = await this.movementRepository.findOne({
       where: { id, deletedAt: IsNull() },
     });
@@ -407,15 +273,7 @@ export class InventoryMovementService {
     const movement = await this.movementRepository.findOne({
       where: { id },
       withDeleted: true,
-      relations: [
-        'product',
-        'product.category',
-        'product.unit',
-        'branch',
-        'inventory',
-        'sourceBranch',
-        'targetBranch',
-      ],
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
     });
 
     if (!movement) {
@@ -423,9 +281,7 @@ export class InventoryMovementService {
     }
 
     if (!movement.deletedAt) {
-      throw new ConflictException(
-        `El movimiento con ID ${id} no está eliminado`,
-      );
+      throw new ConflictException(`El movimiento con ID ${id} no está eliminado`);
     }
 
     movement.deletedAt = null;
@@ -440,9 +296,7 @@ export class InventoryMovementService {
     cancelled: number;
     byType: Record<MovementType, number>;
   }> {
-    const query = this.movementRepository
-      .createQueryBuilder('movement')
-      .where('movement.deletedAt IS NULL');
+    const query = this.movementRepository.createQueryBuilder('movement').where('movement.deletedAt IS NULL');
 
     if (branchId) {
       query.andWhere('movement.branch_id = :branchId', { branchId });
@@ -464,12 +318,9 @@ export class InventoryMovementService {
 
     return {
       total: movements.length,
-      completed: movements.filter((m) => m.status === MovementStatus.COMPLETED)
-        .length,
-      pending: movements.filter((m) => m.status === MovementStatus.PENDING)
-        .length,
-      cancelled: movements.filter((m) => m.status === MovementStatus.CANCELLED)
-        .length,
+      completed: movements.filter((m) => m.status === MovementStatus.COMPLETED).length,
+      pending: movements.filter((m) => m.status === MovementStatus.PENDING).length,
+      cancelled: movements.filter((m) => m.status === MovementStatus.CANCELLED).length,
       byType,
     };
   }
@@ -480,7 +331,6 @@ export class InventoryMovementService {
     await queryRunner.startTransaction();
 
     try {
-      // Obtener o crear el inventory
       let inventory = await queryRunner.manager.findOne(Inventory, {
         where: {
           product: { id: movement.product.id },
@@ -500,7 +350,6 @@ export class InventoryMovementService {
 
       const previousStock = Number(inventory.stock);
 
-      // Actualizar stock según el tipo de movimiento
       switch (movement.type) {
         case MovementType.IN:
         case MovementType.TRANSFER_IN:
@@ -510,9 +359,7 @@ export class InventoryMovementService {
         case MovementType.OUT:
         case MovementType.TRANSFER_OUT:
           if (previousStock < movement.quantity) {
-            throw new BadRequestException(
-              'Stock insuficiente para realizar el movimiento',
-            );
+            throw new BadRequestException('Stock insuficiente para realizar el movimiento');
           }
           inventory.stock = previousStock - Number(movement.quantity);
           break;
@@ -521,7 +368,6 @@ export class InventoryMovementService {
       inventory.lastMovementDate = new Date();
       const updatedInventory = await queryRunner.manager.save(inventory);
 
-      // Guardar stocks en el movimiento para auditoría
       await queryRunner.manager.update(InventoryMovement, movement.id, {
         previousStock,
         newStock: updatedInventory.stock,
@@ -548,16 +394,13 @@ export class InventoryMovementService {
     inMovement: InventoryMovementResponseDto;
   }> {
     if (fromBranchId === toBranchId) {
-      throw new BadRequestException(
-        'Las sucursales de origen y destino no pueden ser las mismas',
-      );
+      throw new BadRequestException('Las sucursales de origen y destino no pueden ser las mismas');
     }
 
     if (quantity <= 0) {
       throw new BadRequestException('La cantidad debe ser mayor a 0');
     }
 
-    // Crear movimiento de salida
     const outMovement = await this.create(
       {
         productId,
@@ -574,7 +417,6 @@ export class InventoryMovementService {
       true,
     );
 
-    // Crear movimiento de entrada
     const inMovement = await this.create(
       {
         productId,
@@ -592,7 +434,6 @@ export class InventoryMovementService {
       true,
     );
 
-    // Actualizar el movimiento de salida con el ID del movimiento de entrada para referencia mutua
     await this.movementRepository.update(outMovement.id, {
       referenceId: inMovement.id,
     });
@@ -614,23 +455,16 @@ export class InventoryMovementService {
     });
 
     if (movements.length !== 2) {
-      throw new NotFoundException(
-        `Transferencia con referenceId ${referenceId} no encontrada`,
-      );
+      throw new NotFoundException(`Transferencia con referenceId ${referenceId} no encontrada`);
     }
 
-    const outMovement = movements.find(
-      (m) => m.type === MovementType.TRANSFER_OUT,
-    );
-    const inMovement = movements.find(
-      (m) => m.type === MovementType.TRANSFER_IN,
-    );
+    const outMovement = movements.find((m) => m.type === MovementType.TRANSFER_OUT);
+    const inMovement = movements.find((m) => m.type === MovementType.TRANSFER_IN);
 
     if (!outMovement || !inMovement) {
       throw new NotFoundException('Transferencia incompleta');
     }
 
-    // Completar ambos movimientos
     const completedOut = await this.completeMovement(outMovement.id);
     const completedIn = await this.completeMovement(inMovement.id);
 

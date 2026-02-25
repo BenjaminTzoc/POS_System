@@ -1,4 +1,5 @@
 export { UnitService } from './unit.service';
+export { AreaService } from './area.service';
 export { CategoryService } from './category.service';
 export { ProductService } from './product.service';
 export { BranchService } from './branch.service';

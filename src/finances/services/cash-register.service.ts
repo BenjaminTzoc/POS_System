@@ -1,26 +1,10 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, IsNull } from 'typeorm';
-import {
-  CashRegister,
-  CashRegisterStatus,
-} from '../entities/cash-register.entity';
-import {
-  OpenCashRegisterDto,
-  CloseCashRegisterDto,
-  CashRegisterResponseDto,
-} from '../dto/cash-register.dto';
-import {
-  SalePayment,
-  PaymentStatus,
-} from '../../sales/entities/sale-payment.entity';
+import { CashRegister, CashRegisterStatus } from '../entities/cash-register.entity';
+import { OpenCashRegisterDto, CloseCashRegisterDto, CashRegisterResponseDto } from '../dto/cash-register.dto';
+import { SalePayment, PaymentStatus } from '../../sales/entities/sale-payment.entity';
 import { PaymentMethod } from '../../purchases/entities/payment-method.entity';
-import { plainToInstance } from 'class-transformer';
 
 @Injectable()
 export class CashRegisterService {
@@ -33,11 +17,7 @@ export class CashRegisterService {
     private readonly paymentMethodRepository: Repository<PaymentMethod>,
   ) {}
 
-  async open(
-    dto: OpenCashRegisterDto,
-    userId: string,
-  ): Promise<CashRegisterResponseDto> {
-    // Verificar si el usuario ya tiene una caja abierta
+  async open(dto: OpenCashRegisterDto, userId: string): Promise<CashRegisterResponseDto> {
     const openSession = await this.cashRegisterRepository.findOne({
       where: {
         user: { id: userId },
@@ -72,39 +52,23 @@ export class CashRegisterService {
     return session ? this.mapToDto(session) : null;
   }
 
-  async close(
-    id: string,
-    dto: CloseCashRegisterDto,
-    userId: string,
-  ): Promise<CashRegisterResponseDto> {
+  async close(id: string, dto: CloseCashRegisterDto, userId: string): Promise<CashRegisterResponseDto> {
     const session = await this.cashRegisterRepository.findOne({
       where: { id, user: { id: userId }, status: CashRegisterStatus.OPEN },
     });
 
     if (!session) {
-      throw new NotFoundException(
-        'Sesión de caja no encontrada o ya está cerrada',
-      );
+      throw new NotFoundException('Sesión de caja no encontrada o ya está cerrada');
     }
 
-    // Calcular el balance esperado
-    // 1. Obtener el método de pago "Efectivo"
     const cashMethod = await this.paymentMethodRepository.findOne({
-      where: [
-        { name: 'Efectivo' },
-        { name: 'EFECTIVO' },
-        { code: 'CASH' },
-        { code: 'EFECTIVO' },
-      ],
+      where: [{ name: 'Efectivo' }, { name: 'EFECTIVO' }, { code: 'CASH' }, { code: 'EFECTIVO' }],
     });
 
     if (!cashMethod) {
-      throw new BadRequestException(
-        'No se encontró un método de pago de tipo "Efectivo" en el sistema',
-      );
+      throw new BadRequestException('No se encontró un método de pago de tipo "Efectivo" en el sistema');
     }
 
-    // 2. Sumar ventas en efectivo desde la apertura
     const salesPayments = await this.salePaymentRepository.find({
       where: {
         date: Between(session.openedAt, new Date()),
@@ -115,16 +79,11 @@ export class CashRegisterService {
       relations: ['sale', 'sale.branch'],
     });
 
-    const totalCashSales = salesPayments.reduce(
-      (sum, p) => sum + Number(p.amount),
-      0,
-    );
+    const totalCashSales = salesPayments.reduce((sum, p) => sum + Number(p.amount), 0);
 
-    // TODO: Restar gastos si se implementan en el futuro
     const totalExpenses = 0;
 
-    const expectedBalance =
-      Number(session.openingBalance) + totalCashSales - totalExpenses;
+    const expectedBalance = Number(session.openingBalance) + totalCashSales - totalExpenses;
     const difference = dto.closingBalance - expectedBalance;
 
     session.closedAt = new Date();
@@ -138,16 +97,8 @@ export class CashRegisterService {
     return this.mapToDto(savedSession);
   }
 
-  async getHistory(
-    branchId?: string,
-    startDate?: Date,
-    endDate?: Date,
-  ): Promise<CashRegisterResponseDto[]> {
-    const query = this.cashRegisterRepository
-      .createQueryBuilder('session')
-      .leftJoinAndSelect('session.user', 'user')
-      .leftJoinAndSelect('session.branch', 'branch')
-      .orderBy('session.openedAt', 'DESC');
+  async getHistory(branchId?: string, startDate?: Date, endDate?: Date): Promise<CashRegisterResponseDto[]> {
+    const query = this.cashRegisterRepository.createQueryBuilder('session').leftJoinAndSelect('session.user', 'user').leftJoinAndSelect('session.branch', 'branch').orderBy('session.openedAt', 'DESC');
 
     if (branchId) {
       query.andWhere('branch.id = :branchId', { branchId });
@@ -175,9 +126,7 @@ export class CashRegisterService {
       closedAt: session.closedAt,
       openingBalance: Number(session.openingBalance),
       expectedBalance: Number(session.expectedBalance),
-      closingBalance: session.closingBalance
-        ? Number(session.closingBalance)
-        : null,
+      closingBalance: session.closingBalance ? Number(session.closingBalance) : null,
       difference: session.difference ? Number(session.difference) : null,
       status: session.status,
       notes: session.notes,

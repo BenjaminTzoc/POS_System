@@ -1,4 +1,5 @@
 export { UnitsController } from './units.controller';
+export { AreaController } from './area.controller';
 export { CategoryController } from './category.controller';
 export { ProductController } from './product.controller';
 export { BranchController } from './branch.controller';

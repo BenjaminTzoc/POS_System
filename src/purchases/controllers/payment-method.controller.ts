@@ -5,9 +5,7 @@ import { Public } from 'src/auth/decorators';
 
 @Controller('payment-methods')
 export class PaymentMethodController {
-  constructor(
-    private readonly paymentMethodService: PaymentMethodService,
-  ) {}
+  constructor(private readonly paymentMethodService: PaymentMethodService) {}
 
   @Post()
   @Public()
@@ -36,10 +34,7 @@ export class PaymentMethodController {
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdatePaymentMethodDto,
-  ): Promise<PaymentMethodResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePaymentMethodDto): Promise<PaymentMethodResponseDto> {
     return this.paymentMethodService.update(id, dto);
   }
 

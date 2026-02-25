@@ -51,7 +51,6 @@ export class Sale extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
-  // ---------------- TOTALS -----------------
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   subtotal: number;
 
@@ -83,7 +82,6 @@ export class Sale extends BaseEntity {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   total: number;
 
-  // ----------------- PAYMENTS ------------------
   @Column({
     name: 'paid_amount',
     type: 'decimal',
@@ -96,7 +94,6 @@ export class Sale extends BaseEntity {
   @Column({ name: 'pending_amount', type: 'decimal', precision: 12, scale: 2 })
   pendingAmount: number;
 
-  // ------------- RELATIONSHIPS -------------
   @ManyToOne(() => Customer, { eager: true, nullable: true })
   @JoinColumn({ name: 'customer_id' })
   customer: Customer | null;

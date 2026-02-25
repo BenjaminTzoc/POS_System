@@ -7,16 +7,7 @@ import { LogisticsModule } from 'src/logistics/logistics.module';
 import { PurchaseGateway } from './gateway/purchase.gateway';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([
-      Supplier,
-      PaymentMethod,
-      Purchase,
-      PurchaseDetail,
-      PurchasePayment,
-    ]),
-    LogisticsModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Supplier, PaymentMethod, Purchase, PurchaseDetail, PurchasePayment]), LogisticsModule],
   controllers: [SupplierController, PaymentMethodController, PurchaseController, PurchasePaymentController],
   providers: [SupplierService, PaymentMethodService, PurchaseService, PurchasePaymentService, PurchaseGateway],
   exports: [SupplierService, PaymentMethodService, PurchaseService, PurchasePaymentService, PurchaseGateway],

@@ -1,18 +1,9 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Customer } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { CustomerCategoryService } from '.';
-import {
-  CreateCustomerDto,
-  CustomerResponseDto,
-  UpdateCustomerDto,
-} from '../dto';
+import { CreateCustomerDto, CustomerResponseDto, UpdateCustomerDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -24,7 +15,6 @@ export class CustomerService {
   ) {}
 
   async create(dto: CreateCustomerDto): Promise<CustomerResponseDto> {
-    // Verificar si el NIT ya existe
     const existingNit = await this.customerRepository.findOne({
       where: { nit: dto.nit },
       withDeleted: false,
@@ -36,14 +26,11 @@ export class CustomerService {
 
     let category: any = null;
 
-    // Validar y obtener la categoría si se proporciona
     if (dto.categoryId) {
       try {
         category = await this.customerCategoryService.findOne(dto.categoryId);
       } catch (error) {
-        throw new BadRequestException(
-          `La categoría de cliente con ID ${dto.categoryId} no existe`,
-        );
+        throw new BadRequestException(`La categoría de cliente con ID ${dto.categoryId} no existe`);
       }
     }
 
@@ -56,6 +43,7 @@ export class CustomerService {
       address: dto.address,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
       loyaltyPoints: dto.loyaltyPoints || 0,
+      creditLimit: dto.creditLimit ?? (category?.defaultCreditLimit || 0),
       category: category,
     });
 
@@ -63,9 +51,7 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, savedCustomer);
   }
 
-  async findAll(
-    includeDeleted: boolean = false,
-  ): Promise<CustomerResponseDto[]> {
+  async findAll(includeDeleted: boolean = false): Promise<CustomerResponseDto[]> {
     const customers = await this.customerRepository.find({
       where: includeDeleted ? {} : { deletedAt: IsNull() },
       withDeleted: includeDeleted,
@@ -75,10 +61,7 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customers);
   }
 
-  async findOne(
-    id: string,
-    includeDeleted: boolean = false,
-  ): Promise<CustomerResponseDto> {
+  async findOne(id: string, includeDeleted: boolean = false): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id, deletedAt: includeDeleted ? undefined : IsNull() },
       withDeleted: includeDeleted,
@@ -92,10 +75,7 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customer);
   }
 
-  async findByNit(
-    nit: string,
-    includeDeleted: boolean = false,
-  ): Promise<CustomerResponseDto> {
+  async findByNit(nit: string, includeDeleted: boolean = false): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { nit, deletedAt: includeDeleted ? undefined : IsNull() },
       withDeleted: includeDeleted,
@@ -109,10 +89,7 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customer);
   }
 
-  async findByCategory(
-    categoryId: string,
-    includeDeleted: boolean = false,
-  ): Promise<CustomerResponseDto[]> {
+  async findByCategory(categoryId: string, includeDeleted: boolean = false): Promise<CustomerResponseDto[]> {
     const customers = await this.customerRepository.find({
       where: {
         category: { id: categoryId },
@@ -125,10 +102,7 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customers);
   }
 
-  async update(
-    id: string,
-    dto: UpdateCustomerDto,
-  ): Promise<CustomerResponseDto> {
+  async update(id: string, dto: UpdateCustomerDto): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['category'],
@@ -138,7 +112,6 @@ export class CustomerService {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 
-    // Verificar si el nuevo NIT ya existe
     if (dto.nit && dto.nit !== customer.nit) {
       const existingNit = await this.customerRepository.findOne({
         where: { nit: dto.nit, deletedAt: IsNull() },
@@ -149,7 +122,6 @@ export class CustomerService {
       }
     }
 
-    // Manejar categoría
     let category: any = customer.category;
     if (dto.categoryId !== undefined) {
       if (dto.categoryId === null) {
@@ -158,10 +130,15 @@ export class CustomerService {
         try {
           category = await this.customerCategoryService.findOne(dto.categoryId);
         } catch (error) {
-          throw new BadRequestException(
-            `La categoría de cliente con ID ${dto.categoryId} no existe`,
-          );
+          throw new BadRequestException(`La categoría de cliente con ID ${dto.categoryId} no existe`);
         }
+      }
+    }
+
+    let finalCreditLimit = dto.creditLimit ?? customer.creditLimit;
+    if (dto.categoryId !== undefined && dto.creditLimit === undefined && category) {
+      if (!customer.category || customer.category.id !== category.id) {
+        finalCreditLimit = category.defaultCreditLimit || 0;
       }
     }
 
@@ -174,6 +151,7 @@ export class CustomerService {
       address: dto.address ?? customer.address,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : customer.birthDate,
       loyaltyPoints: dto.loyaltyPoints ?? customer.loyaltyPoints,
+      creditLimit: finalCreditLimit,
       category: category,
     });
 
@@ -191,11 +169,8 @@ export class CustomerService {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 
-    // Verificar si el cliente tiene ventas asociadas
     if (customer.sales && customer.sales.length > 0) {
-      throw new ConflictException(
-        'No se puede eliminar el cliente porque tiene ventas asociadas',
-      );
+      throw new ConflictException('No se puede eliminar el cliente porque tiene ventas asociadas');
     }
 
     await this.customerRepository.softRemove(customer);
@@ -222,18 +197,12 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, restoredCustomer);
   }
 
-  async searchCustomers(
-    query: string,
-    includeDeleted: boolean = false,
-  ): Promise<CustomerResponseDto[]> {
+  async searchCustomers(query: string, includeDeleted: boolean = false): Promise<CustomerResponseDto[]> {
     const queryBuilder = this.customerRepository
       .createQueryBuilder('customer')
       .leftJoinAndSelect('customer.category', 'category')
       .where(includeDeleted ? '1=1' : 'customer.deletedAt IS NULL')
-      .andWhere(
-        '(customer.name ILIKE :query OR customer.nit ILIKE :query OR customer.contactName ILIKE :query OR customer.email ILIKE :query)',
-        { query: `%${query}%` },
-      )
+      .andWhere('(customer.name ILIKE :query OR customer.nit ILIKE :query OR customer.contactName ILIKE :query OR customer.email ILIKE :query)', { query: `%${query}%` })
       .orderBy('customer.name', 'ASC');
 
     if (includeDeleted) {
@@ -245,10 +214,7 @@ export class CustomerService {
     return plainToInstance(CustomerResponseDto, customers);
   }
 
-  async addLoyaltyPoints(
-    customerId: string,
-    points: number,
-  ): Promise<CustomerResponseDto> {
+  async addLoyaltyPoints(customerId: string, points: number): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id: customerId, deletedAt: IsNull() },
     });
@@ -258,24 +224,18 @@ export class CustomerService {
     }
 
     if (points <= 0) {
-      throw new BadRequestException(
-        'Los puntos de lealtad deben ser mayores a 0',
-      );
+      throw new BadRequestException('Los puntos de lealtad deben ser mayores a 0');
     }
 
     customer.loyaltyPoints += points;
     const updatedCustomer = await this.customerRepository.save(customer);
 
-    // Recalcular categoría basada en puntos o compras totales
     await this.recalculateCustomerCategory(updatedCustomer.id);
 
     return plainToInstance(CustomerResponseDto, updatedCustomer);
   }
 
-  async redeemLoyaltyPoints(
-    customerId: string,
-    points: number,
-  ): Promise<CustomerResponseDto> {
+  async redeemLoyaltyPoints(customerId: string, points: number): Promise<CustomerResponseDto> {
     const customer = await this.customerRepository.findOne({
       where: { id: customerId, deletedAt: IsNull() },
     });
@@ -285,15 +245,11 @@ export class CustomerService {
     }
 
     if (points <= 0) {
-      throw new BadRequestException(
-        'Los puntos a redimir deben ser mayores a 0',
-      );
+      throw new BadRequestException('Los puntos a redimir deben ser mayores a 0');
     }
 
     if (customer.loyaltyPoints < points) {
-      throw new BadRequestException(
-        'El cliente no tiene suficientes puntos para redimir',
-      );
+      throw new BadRequestException('El cliente no tiene suficientes puntos para redimir');
     }
 
     customer.loyaltyPoints -= points;
@@ -315,7 +271,6 @@ export class CustomerService {
 
     await this.customerRepository.save(customer);
 
-    // Recalcular categoría basada en compras totales
     await this.recalculateCustomerCategory(customerId);
   }
 
@@ -348,7 +303,6 @@ export class CustomerService {
       }
     });
 
-    // Obtener count de eliminados
     const totalCount = await this.customerRepository.count();
     stats.deleted = totalCount - customers.length;
 
@@ -363,30 +317,20 @@ export class CustomerService {
 
     if (!customer) return;
 
-    // Encontrar la categoría apropiada basada en el monto total de compras
-    const appropriateCategory =
-      await this.customerCategoryService.findCategoryByPurchaseAmount(
-        customer.totalPurchases,
-      );
+    const appropriateCategory = await this.customerCategoryService.findCategoryByPurchaseAmount(customer.totalPurchases);
 
-    if (
-      appropriateCategory &&
-      (!customer.category || customer.category.id !== appropriateCategory.id)
-    ) {
+    if (appropriateCategory && (!customer.category || customer.category.id !== appropriateCategory.id)) {
+      if (Number(customer.creditLimit) < Number(appropriateCategory.defaultCreditLimit)) {
+        customer.creditLimit = appropriateCategory.defaultCreditLimit;
+      }
+
       customer.category = { id: appropriateCategory.id } as any;
       await this.customerRepository.save(customer);
     }
   }
 
   async getTopCustomers(limit: number = 10): Promise<CustomerResponseDto[]> {
-    const customers = await this.customerRepository
-      .createQueryBuilder('customer')
-      .leftJoinAndSelect('customer.category', 'category')
-      .where('customer.deletedAt IS NULL')
-      .orderBy('customer.totalPurchases', 'DESC')
-      .addOrderBy('customer.loyaltyPoints', 'DESC')
-      .limit(limit)
-      .getMany();
+    const customers = await this.customerRepository.createQueryBuilder('customer').leftJoinAndSelect('customer.category', 'category').where('customer.deletedAt IS NULL').orderBy('customer.totalPurchases', 'DESC').addOrderBy('customer.loyaltyPoints', 'DESC').limit(limit).getMany();
 
     return plainToInstance(CustomerResponseDto, customers);
   }

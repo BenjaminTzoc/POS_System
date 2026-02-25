@@ -1,15 +1,5 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  IsUUID,
-  IsEmail,
-  IsNumber,
-  Min,
-  IsDateString,
-  Matches,
-} from 'class-validator';
-import { Type, Exclude, Expose } from 'class-transformer';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsEmail, IsNumber, Min, IsDateString, Matches } from 'class-validator';
+import { Type, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { CustomerCategoryResponseDto } from '.';
 
@@ -56,6 +46,12 @@ export class CreateCustomerDto {
   @IsNumber()
   @Min(0)
   loyaltyPoints?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  creditLimit?: number;
 }
 
 export class UpdateCustomerDto {
@@ -101,6 +97,12 @@ export class UpdateCustomerDto {
   @IsNumber()
   @Min(0)
   loyaltyPoints?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  creditLimit?: number;
 }
 
 export class CustomerResponseDto extends BaseEntity {
@@ -133,6 +135,9 @@ export class CustomerResponseDto extends BaseEntity {
 
   @Expose()
   lastPurchaseDate: Date;
+
+  @Expose()
+  creditLimit: number;
 
   @Expose()
   @Type(() => CustomerCategoryResponseDto)

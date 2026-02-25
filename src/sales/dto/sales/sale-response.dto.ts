@@ -10,6 +10,9 @@ import { SalePaymentResponseDto } from '../sale-payment.dto';
 
 export class SaleResponseDto extends BaseEntity {
   @Expose()
+  declare id: string;
+
+  @Expose()
   invoiceNumber: string;
 
   @Expose()

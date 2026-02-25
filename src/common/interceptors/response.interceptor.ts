@@ -31,13 +31,13 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, Response<T>> {
 
   private getMessage(statusCode: number, data: any): string {
     if (data?.message) return data.message;
-    
+
     const messages = {
       200: 'Operación exitosa',
       201: 'Recurso creado exitosamente',
       204: 'Recurso eliminado exitosamente',
     };
-    
+
     return messages[statusCode] || 'Operación completada';
   }
 

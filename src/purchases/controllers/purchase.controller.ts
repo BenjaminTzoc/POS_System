@@ -6,9 +6,7 @@ import { Public } from 'src/auth/decorators';
 
 @Controller('purchases')
 export class PurchaseController {
-  constructor(
-    private readonly purchaseService: PurchaseService,
-  ) {}
+  constructor(private readonly purchaseService: PurchaseService) {}
 
   @Get('next-number')
   @Public()
@@ -65,10 +63,7 @@ export class PurchaseController {
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdatePurchaseDto,
-  ): Promise<PurchaseResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePurchaseDto): Promise<PurchaseResponseDto> {
     return this.purchaseService.update(id, dto);
   }
 
@@ -82,10 +77,7 @@ export class PurchaseController {
   @Post(':id/receive/:branchId')
   @Public()
   @HttpCode(HttpStatus.OK)
-  receivePurchase(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('branchId', ParseUUIDPipe) branchId: string,
-  ): Promise<PurchaseResponseDto> {
+  receivePurchase(@Param('id', ParseUUIDPipe) id: string, @Param('branchId', ParseUUIDPipe) branchId: string): Promise<PurchaseResponseDto> {
     return this.purchaseService.receivePurchase(id, branchId);
   }
 

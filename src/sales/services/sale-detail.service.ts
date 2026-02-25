@@ -17,7 +17,6 @@ export class SaleDetailService {
   ) {}
 
   async create(detailDto: CreateSaleDetailDto, saleId: string): Promise<SaleDetailResponseDto> {
-    // Validar que la venta existe y está en estado pendiente
     const sale = await this.saleRepository.findOne({
       where: { id: saleId, deletedAt: IsNull() },
     });
@@ -30,7 +29,6 @@ export class SaleDetailService {
       throw new BadRequestException('Solo se pueden agregar detalles a ventas pendientes');
     }
 
-    // Validar que el producto existe
     let product;
     try {
       product = await this.productService.findOne(detailDto.productId);
@@ -38,10 +36,9 @@ export class SaleDetailService {
       throw new BadRequestException(`El producto con ID ${detailDto.productId} no existe`);
     }
 
-    // Calcular montos del detalle
     const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
-    const lineDiscount = detailDto.discountAmount || (lineSubtotal * (detailDto.discount || 0) / 100);
-    const lineTax = detailDto.taxAmount || (lineSubtotal * (detailDto.taxPercentage || 0) / 100);
+    const lineDiscount = detailDto.discountAmount || (lineSubtotal * (detailDto.discount || 0)) / 100;
+    const lineTax = detailDto.taxAmount || (lineSubtotal * (detailDto.taxPercentage || 0)) / 100;
     const lineTotal = lineSubtotal - lineDiscount + lineTax;
 
     const detail = this.saleDetailRepository.create({
@@ -58,7 +55,6 @@ export class SaleDetailService {
 
     const savedDetail = await this.saleDetailRepository.save(detail);
 
-    // Recalcular totales de la venta
     await this.recalculateSaleTotals(saleId);
 
     return plainToInstance(SaleDetailResponseDto, savedDetail);
@@ -66,9 +62,9 @@ export class SaleDetailService {
 
   async findAllBySale(saleId: string): Promise<SaleDetailResponseDto[]> {
     const details = await this.saleDetailRepository.find({
-      where: { 
+      where: {
         sale: { id: saleId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['product', 'product.category', 'product.unit'],
       order: { createdAt: 'ASC' },
@@ -99,20 +95,18 @@ export class SaleDetailService {
       throw new NotFoundException(`Detalle de venta con ID ${id} no encontrado`);
     }
 
-    // Validar que la venta esté pendiente
     if (detail.sale.status !== SaleStatus.PENDING) {
       throw new BadRequestException('Solo se pueden modificar detalles de ventas pendientes');
     }
 
-    // Calcular nuevos montos si se actualizan campos relevantes
     const quantity = dto.quantity ?? detail.quantity;
     const unitPrice = dto.unitPrice ?? detail.unitPrice;
     const discount = dto.discount ?? detail.discount;
     const taxPercentage = dto.taxPercentage ?? detail.taxPercentage;
 
     const lineSubtotal = quantity * unitPrice;
-    const lineDiscount = dto.discountAmount ?? (lineSubtotal * discount / 100);
-    const lineTax = dto.taxAmount ?? (lineSubtotal * taxPercentage / 100);
+    const lineDiscount = dto.discountAmount ?? (lineSubtotal * discount) / 100;
+    const lineTax = dto.taxAmount ?? (lineSubtotal * taxPercentage) / 100;
     const lineTotal = lineSubtotal - lineDiscount + lineTax;
 
     Object.assign(detail, {
@@ -127,7 +121,6 @@ export class SaleDetailService {
 
     const updatedDetail = await this.saleDetailRepository.save(detail);
 
-    // Recalcular totales de la venta
     await this.recalculateSaleTotals(detail.sale.id);
 
     return plainToInstance(SaleDetailResponseDto, updatedDetail);
@@ -143,14 +136,12 @@ export class SaleDetailService {
       throw new NotFoundException(`Detalle de venta con ID ${id} no encontrado`);
     }
 
-    // Validar que la venta esté pendiente
     if (detail.sale.status !== SaleStatus.PENDING) {
       throw new BadRequestException('Solo se pueden eliminar detalles de ventas pendientes');
     }
 
     await this.saleDetailRepository.softRemove(detail);
 
-    // Recalcular totales de la venta
     await this.recalculateSaleTotals(detail.sale.id);
 
     return { message: 'Detalle de venta eliminado exitosamente' };
@@ -165,9 +156,9 @@ export class SaleDetailService {
     mostSoldProduct: { productId: string; productName: string; quantity: number } | null;
   }> {
     const details = await this.saleDetailRepository.find({
-      where: { 
+      where: {
         sale: { id: saleId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['product'],
     });
@@ -194,12 +185,11 @@ export class SaleDetailService {
 
     const productQuantities: Map<string, { name: string; quantity: number }> = new Map();
 
-    details.forEach(detail => {
+    details.forEach((detail) => {
       stats.totalQuantity += detail.quantity;
       stats.totalTax += detail.taxAmount;
       stats.totalDiscount += detail.discountAmount;
 
-      // Calcular producto más vendido
       if (productQuantities.has(detail.product.id)) {
         const existing = productQuantities.get(detail.product.id)!;
         existing.quantity += detail.quantity;
@@ -213,7 +203,6 @@ export class SaleDetailService {
 
     stats.averagePrice = details.reduce((sum, detail) => sum + detail.unitPrice, 0) / details.length;
 
-    // Encontrar el producto más vendido
     if (productQuantities.size > 0) {
       let maxQuantity = 0;
       let mostSold: any = null;
@@ -237,14 +226,7 @@ export class SaleDetailService {
     averagePrice: number;
     salesCount: number;
   }> {
-    const details = await this.saleDetailRepository
-      .createQueryBuilder('detail')
-      .leftJoinAndSelect('detail.sale', 'sale')
-      .leftJoinAndSelect('detail.product', 'product')
-      .where('detail.product_id = :productId', { productId })
-      .andWhere('detail.deletedAt IS NULL')
-      .andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
-      .getMany();
+    const details = await this.saleDetailRepository.createQueryBuilder('detail').leftJoinAndSelect('detail.sale', 'sale').leftJoinAndSelect('detail.product', 'product').where('detail.product_id = :productId', { productId }).andWhere('detail.deletedAt IS NULL').andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED }).getMany();
 
     const stats = {
       totalSold: 0,
@@ -253,7 +235,7 @@ export class SaleDetailService {
       salesCount: details.length,
     };
 
-    details.forEach(detail => {
+    details.forEach((detail) => {
       stats.totalSold += detail.quantity;
       stats.totalRevenue += detail.lineTotal;
     });
@@ -265,17 +247,20 @@ export class SaleDetailService {
 
   private async recalculateSaleTotals(saleId: string): Promise<void> {
     const details = await this.saleDetailRepository.find({
-      where: { 
+      where: {
         sale: { id: saleId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
     });
 
-    const totals = details.reduce((acc, detail) => ({
-      subtotal: acc.subtotal + (detail.quantity * detail.unitPrice),
-      discountAmount: acc.discountAmount + detail.discountAmount,
-      taxAmount: acc.taxAmount + detail.taxAmount,
-    }), { subtotal: 0, discountAmount: 0, taxAmount: 0 });
+    const totals = details.reduce(
+      (acc, detail) => ({
+        subtotal: acc.subtotal + detail.quantity * detail.unitPrice,
+        discountAmount: acc.discountAmount + detail.discountAmount,
+        taxAmount: acc.taxAmount + detail.taxAmount,
+      }),
+      { subtotal: 0, discountAmount: 0, taxAmount: 0 },
+    );
 
     const total = totals.subtotal - totals.discountAmount + totals.taxAmount;
 
@@ -284,20 +269,12 @@ export class SaleDetailService {
       discountAmount: totals.discountAmount,
       taxAmount: totals.taxAmount,
       total: total,
-      pendingAmount: total, // Asumimos que no hay pagos aún al modificar detalles
+      pendingAmount: total,
     });
   }
 
   async findDetailsWithDiscounts(saleId: string): Promise<SaleDetailResponseDto[]> {
-    const details = await this.saleDetailRepository
-      .createQueryBuilder('detail')
-      .leftJoinAndSelect('detail.product', 'product')
-      .leftJoinAndSelect('product.category', 'category')
-      .where('detail.sale_id = :saleId', { saleId })
-      .andWhere('detail.deletedAt IS NULL')
-      .andWhere('detail.discount > 0')
-      .orderBy('detail.discount', 'DESC')
-      .getMany();
+    const details = await this.saleDetailRepository.createQueryBuilder('detail').leftJoinAndSelect('detail.product', 'product').leftJoinAndSelect('product.category', 'category').where('detail.sale_id = :saleId', { saleId }).andWhere('detail.deletedAt IS NULL').andWhere('detail.discount > 0').orderBy('detail.discount', 'DESC').getMany();
 
     return plainToInstance(SaleDetailResponseDto, details);
   }
@@ -320,7 +297,6 @@ export class SaleDetailService {
       throw new BadRequestException('Solo se pueden modificar detalles de ventas pendientes');
     }
 
-    // Recalcular montos basados en la nueva cantidad
     const lineSubtotal = quantity * detail.unitPrice;
     const lineDiscount = lineSubtotal * (detail.discount / 100);
     const lineTax = lineSubtotal * (detail.taxPercentage / 100);
@@ -333,7 +309,6 @@ export class SaleDetailService {
 
     const updatedDetail = await this.saleDetailRepository.save(detail);
 
-    // Recalcular totales de la venta
     await this.recalculateSaleTotals(detail.sale.id);
 
     return plainToInstance(SaleDetailResponseDto, updatedDetail);

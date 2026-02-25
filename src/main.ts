@@ -10,7 +10,7 @@ async function bootstrap() {
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
-  })
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -19,13 +19,13 @@ async function bootstrap() {
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
-      }
-    })
+      },
+    }),
   );
 
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  app.setGlobalPrefix('api/v1')
+  app.setGlobalPrefix('api/v1');
 
   app.enableCors({
     origin: true,
@@ -35,7 +35,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
-  
-  console.log(`🚀 Application running on: http://localhost:${port}/api/v1`)
+
+  console.log(`🚀 Application running on: http://localhost:${port}/api/v1`);
 }
 bootstrap();

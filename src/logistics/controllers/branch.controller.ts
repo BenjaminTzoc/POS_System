@@ -1,22 +1,9 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Put,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { BranchResponseDto, CreateBranchDto, UpdateBranchDto } from '../dto';
 import { BranchService } from '../services';
 import { Permissions } from 'src/auth/decorators';
 import { User } from 'src/common/decorators/user.decorator';
-import { isSuperAdmin } from 'src/utils/user-scope.util';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 
 @Controller('branches')
 export class BranchController {
@@ -30,20 +17,13 @@ export class BranchController {
   }
 
   @Get()
-  findAll(
-    @Query('includeDeleted') includeDeleted: string,
-    @User() user: any,
-  ): Promise<BranchResponseDto[]> {
+  findAll(@Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<BranchResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     return this.branchService.findAll(showDeleted);
   }
 
   @Get('search')
-  search(
-    @Query('q') query: string,
-    @Query('includeDeleted') includeDeleted: string,
-    @User() user: any,
-  ): Promise<BranchResponseDto[]> {
+  search(@Query('q') query: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<BranchResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     return this.branchService.searchBranches(query, showDeleted);
   }
@@ -54,21 +34,14 @@ export class BranchController {
   }
 
   @Get(':id')
-  findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query('includeDeleted') includeDeleted: string,
-    @User() user: any,
-  ): Promise<BranchResponseDto> {
+  findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<BranchResponseDto> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     return this.branchService.findOne(id, showDeleted);
   }
 
   @Put(':id')
   @Permissions('branches.manage')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateBranchDto,
-  ): Promise<BranchResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateBranchDto): Promise<BranchResponseDto> {
     return this.branchService.update(id, dto);
   }
 

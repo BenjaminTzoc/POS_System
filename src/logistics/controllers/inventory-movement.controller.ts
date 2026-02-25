@@ -1,25 +1,6 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Put,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { InventoryMovementService } from '../services';
-import {
-  CreateInventoryMovementDto,
-  InventoryMovementResponseDto,
-  UpdateInventoryMovementDto,
-  CancelMovementDto,
-} from '../dto';
+import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto, CancelMovementDto } from '../dto';
 import { MovementType } from '../entities/inventory-movement.entity';
 import { Public } from 'src/auth/decorators';
 
@@ -29,10 +10,7 @@ export class InventoryMovementController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(
-    @Body() dto: CreateInventoryMovementDto,
-    @Req() req,
-  ): Promise<InventoryMovementResponseDto> {
+  create(@Body() dto: CreateInventoryMovementDto, @Req() req): Promise<InventoryMovementResponseDto> {
     const userId = req.user?.id;
     return this.movementService.create(dto, userId);
   }
@@ -50,13 +28,7 @@ export class InventoryMovementController {
     outMovement: InventoryMovementResponseDto;
     inMovement: InventoryMovementResponseDto;
   }> {
-    return this.movementService.createTransfer(
-      productId,
-      fromBranchId,
-      toBranchId,
-      quantity,
-      notes,
-    );
+    return this.movementService.createTransfer(productId, fromBranchId, toBranchId, quantity, notes);
   }
 
   @Post('transfer/:referenceId/complete')
@@ -77,25 +49,19 @@ export class InventoryMovementController {
 
   @Get('product/:productId')
   @Public()
-  findByProduct(
-    @Param('productId', ParseUUIDPipe) productId: string,
-  ): Promise<InventoryMovementResponseDto[]> {
+  findByProduct(@Param('productId', ParseUUIDPipe) productId: string): Promise<InventoryMovementResponseDto[]> {
     return this.movementService.findByProduct(productId);
   }
 
   @Get('branch/:branchId')
   @Public()
-  findByBranch(
-    @Param('branchId', ParseUUIDPipe) branchId: string,
-  ): Promise<InventoryMovementResponseDto[]> {
+  findByBranch(@Param('branchId', ParseUUIDPipe) branchId: string): Promise<InventoryMovementResponseDto[]> {
     return this.movementService.findByBranch(branchId);
   }
 
   @Get('type/:type')
   @Public()
-  findByType(
-    @Param('type') type: MovementType,
-  ): Promise<InventoryMovementResponseDto[]> {
+  findByType(@Param('type') type: MovementType): Promise<InventoryMovementResponseDto[]> {
     return this.movementService.findByType(type);
   }
 
@@ -113,38 +79,26 @@ export class InventoryMovementController {
 
   @Get(':id')
   @Public()
-  findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<InventoryMovementResponseDto> {
+  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryMovementResponseDto> {
     return this.movementService.findOne(id);
   }
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateInventoryMovementDto,
-  ): Promise<InventoryMovementResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateInventoryMovementDto): Promise<InventoryMovementResponseDto> {
     return this.movementService.update(id, dto);
   }
 
   @Patch(':id/complete')
   @HttpCode(HttpStatus.OK)
-  completeMovement(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req,
-  ): Promise<InventoryMovementResponseDto> {
+  completeMovement(@Param('id', ParseUUIDPipe) id: string, @Req() req): Promise<InventoryMovementResponseDto> {
     const userId = req.user?.id;
     return this.movementService.completeMovement(id, userId);
   }
 
   @Patch(':id/cancel')
   @HttpCode(HttpStatus.OK)
-  cancelMovement(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: CancelMovementDto,
-    @Req() req,
-  ): Promise<InventoryMovementResponseDto> {
+  cancelMovement(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelMovementDto, @Req() req): Promise<InventoryMovementResponseDto> {
     const userId = req.user?.id;
     return this.movementService.cancelMovement(id, userId, dto.reason);
   }
@@ -159,9 +113,7 @@ export class InventoryMovementController {
   @Patch(':id/restore')
   @Public()
   @HttpCode(HttpStatus.OK)
-  restore(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<InventoryMovementResponseDto> {
+  restore(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryMovementResponseDto> {
     return this.movementService.restore(id);
   }
 }

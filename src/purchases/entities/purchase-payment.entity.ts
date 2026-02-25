@@ -5,7 +5,7 @@ import { PaymentMethod, Purchase } from '.';
 export enum PaymentStatus {
   PENDING = 'pending',
   COMPLETED = 'completed',
-  CANCELLED = 'cancelled'
+  CANCELLED = 'cancelled',
 }
 
 @Entity('purchase_payments')

@@ -15,7 +15,7 @@ export class MailService {
     this.transporter = nodemailer.createTransport({
       host,
       port,
-      secure: port === 465, // true for 465, false for other ports
+      secure: port === 465,
       auth: {
         user,
         pass,
@@ -26,12 +26,7 @@ export class MailService {
     });
   }
 
-  async sendMail(
-    to: string,
-    subject: string,
-    text: string,
-    attachments?: any[],
-  ) {
+  async sendMail(to: string, subject: string, text: string, attachments?: any[]) {
     try {
       const mailOptions = {
         from: `"Sistema POS" <${this.configService.get('MAIL_USER')}>`,
@@ -45,9 +40,7 @@ export class MailService {
       return info;
     } catch (error) {
       console.error('Error sending email:', error);
-      throw new InternalServerErrorException(
-        'Error al enviar el correo electrónico',
-      );
+      throw new InternalServerErrorException('Error al enviar el correo electrónico');
     }
   }
 }

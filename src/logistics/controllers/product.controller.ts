@@ -1,31 +1,12 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Put,
-  Query,
-  Req,
-  UploadedFile,
-  UseInterceptors,
-  UseGuards,
-  ForbiddenException,
-} from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UploadedFile, UseInterceptors, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ProductService } from '../services';
-import { CreateProductDto, ProductResponseDto, UpdateProductDto } from '../dto';
+import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto } from '../dto';
 import { Permissions, Public } from 'src/auth/decorators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from 'src/auth/guards/permissions.guard';
-import { isSuperAdmin } from 'src/utils/user-scope.util';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -36,20 +17,14 @@ export class ProductController {
   @Public()
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(FileInterceptor('image'))
-  async create(
-    @Body() dto: CreateProductDto,
-    @UploadedFile() image?: Express.Multer.File,
-  ) {
+  async create(@Body() dto: CreateProductDto, @UploadedFile() image?: Express.Multer.File) {
     const product = await this.productService.createWithInventory(dto, image);
     return { id: product.id };
   }
 
   @Get()
   @Permissions('products.manage')
-  async findAll(
-    @Req() req,
-    @Query('includeDeleted') includeDeleted: string,
-  ): Promise<ProductResponseDto[]> {
+  async findAll(@Req() req, @Query('includeDeleted') includeDeleted: string): Promise<ProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
@@ -63,17 +38,10 @@ export class ProductController {
   }
 
   @Get('search')
-  async search(
-    @Query('q') query: string,
-    @Query('branchId') branchIdParam: string,
-    @Query('includeDeleted') includeDeleted: string,
-    @Req() req,
-  ): Promise<ProductResponseDto[]> {
+  async search(@Query('q') query: string, @Query('branchId') branchIdParam: string, @Query('includeDeleted') includeDeleted: string, @Req() req): Promise<ProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
-    // Si es SuperAdmin, puede filtrar por la sucursal que quiera (o null para global)
-    // Si NO es SuperAdmin, se fuerza su sucursal asignada
     const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
 
     if (!isSuperAdmin(user) && !branchId) {
@@ -84,10 +52,7 @@ export class ProductController {
   }
 
   @Get('top-selling')
-  async getTopSelling(
-    @Query('branchId') branchIdParam: string,
-    @Req() req,
-  ): Promise<ProductResponseDto[]> {
+  async getTopSelling(@Query('branchId') branchIdParam: string, @Req() req): Promise<ProductResponseDto[]> {
     const user = req.user;
     const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
 
@@ -98,6 +63,12 @@ export class ProductController {
     return this.productService.getTopSelling(branchId);
   }
 
+  @Get('branch/:branchId/catalog')
+  @Permissions('products.manage')
+  async getBranchCatalog(@Param('branchId', ParseUUIDPipe) branchId: string): Promise<BranchProductResponseDto[]> {
+    return this.productService.getBranchCatalog(branchId);
+  }
+
   @Get('sku/:sku')
   @Public()
   findBySku(@Param('sku') sku: string): Promise<ProductResponseDto> {
@@ -106,19 +77,13 @@ export class ProductController {
 
   @Get('barcode/:barcode')
   @Public()
-  findByBarcode(
-    @Param('barcode') barcode: string,
-  ): Promise<ProductResponseDto> {
+  findByBarcode(@Param('barcode') barcode: string): Promise<ProductResponseDto> {
     return this.productService.findByBarcode(barcode);
   }
 
   @Get(':id')
   @Permissions('products.manage')
-  findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query('includeDeleted') includeDeleted: string,
-    @Req() req,
-  ): Promise<ProductResponseDto> {
+  findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @Req() req): Promise<ProductResponseDto> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
@@ -134,41 +99,30 @@ export class ProductController {
   @Put(':id')
   @Public()
   @UseInterceptors(FileInterceptor('image'))
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateProductDto,
-    @UploadedFile() image?: Express.Multer.File,
-  ): Promise<ProductResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto, @UploadedFile() image?: Express.Multer.File): Promise<ProductResponseDto> {
     console.log('DTOoooooooooooo --->', dto);
     return this.productService.update(id, dto, image);
   }
 
-  // NUEVO ENDPOINT para actualizar solo la imagen
   @Put(':id/image')
   @Public()
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
       limits: {
-        fileSize: 5 * 1024 * 1024, // 5MB
+        fileSize: 5 * 1024 * 1024,
       },
       fileFilter: (req, file, cb) => {
         if (file.mimetype.startsWith('image/')) {
           cb(null, true);
         } else {
-          cb(
-            new BadRequestException('Solo se permiten archivos de imagen'),
-            false,
-          );
+          cb(new BadRequestException('Solo se permiten archivos de imagen'), false);
         }
       },
     }),
   )
   @HttpCode(HttpStatus.OK)
-  updateImage(
-    @Param('id', ParseUUIDPipe) id: string,
-    @UploadedFile() image: any,
-  ): Promise<ProductResponseDto> {
+  updateImage(@Param('id', ParseUUIDPipe) id: string, @UploadedFile() image: any): Promise<ProductResponseDto> {
     if (!image) {
       throw new BadRequestException('Debe proporcionar una imagen');
     }

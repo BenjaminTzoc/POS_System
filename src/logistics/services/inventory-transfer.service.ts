@@ -1,30 +1,9 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
-import {
-  InventoryTransfer,
-  InventoryTransferItem,
-  TransferStatus,
-  InventoryMovement,
-  MovementType,
-  MovementStatus,
-  MovementConcept,
-  Inventory,
-  Product,
-  Branch,
-} from '../entities';
-import {
-  CreateInventoryTransferDto,
-  InventoryTransferResponseDto,
-  UpdateTransferStatusDto,
-} from '../dto';
+import { DataSource, IsNull, Repository, MoreThanOrEqual, LessThanOrEqual, Between } from 'typeorm';
+import { InventoryTransfer, InventoryTransferItem, TransferStatus, MovementType, MovementStatus, MovementConcept, Inventory, Product, Branch } from '../entities';
+import { CreateInventoryTransferDto, InventoryTransferResponseDto, InventoryTransferListResponseDto, UpdateTransferStatusDto } from '../dto';
 import { InventoryMovementService } from './inventory-movement.service';
-import { plainToInstance } from 'class-transformer';
 
 @Injectable()
 export class InventoryTransferService {
@@ -41,14 +20,9 @@ export class InventoryTransferService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async create(
-    dto: CreateInventoryTransferDto,
-    userId: string,
-  ): Promise<InventoryTransferResponseDto> {
+  async create(dto: CreateInventoryTransferDto, userId: string): Promise<InventoryTransferResponseDto> {
     if (dto.originBranchId === dto.destinationBranchId) {
-      throw new BadRequestException(
-        'La sucursal de origen y destino no pueden ser la misma',
-      );
+      throw new BadRequestException('La sucursal de origen y destino no pueden ser la misma');
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -56,7 +30,6 @@ export class InventoryTransferService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Validar sucursales
       const originBranch = await this.branchRepository.findOne({
         where: { id: dto.originBranchId },
       });
@@ -68,7 +41,6 @@ export class InventoryTransferService {
         throw new NotFoundException('Una o ambas sucursales no existen');
       }
 
-      // 2. Crear cabecera de traslado
       const transferNumber = await this.generateTransferNumber();
       const transfer = this.transferRepository.create({
         originBranch,
@@ -81,19 +53,15 @@ export class InventoryTransferService {
 
       const savedTransfer = await queryRunner.manager.save(transfer);
 
-      // 3. Procesar items
       const transferItems: InventoryTransferItem[] = [];
       for (const itemDto of dto.items) {
         const product = await this.productRepository.findOne({
           where: { id: itemDto.productId },
         });
         if (!product) {
-          throw new NotFoundException(
-            `Producto con ID ${itemDto.productId} no encontrado`,
-          );
+          throw new NotFoundException(`Producto con ID ${itemDto.productId} no encontrado`);
         }
 
-        // Verificar stock en origen
         const inventory = await queryRunner.manager.findOne(Inventory, {
           where: {
             product: { id: product.id },
@@ -103,9 +71,7 @@ export class InventoryTransferService {
         });
 
         if (!inventory || Number(inventory.stock) < itemDto.quantity) {
-          throw new BadRequestException(
-            `Stock insuficiente para el producto ${product.name} en la sucursal de origen. Disponible: ${inventory ? inventory.stock : 0}`,
-          );
+          throw new BadRequestException(`Stock insuficiente para el producto ${product.name} en la sucursal de origen. Disponible: ${inventory ? inventory.stock : 0}`);
         }
 
         const item = this.transferItemRepository.create({
@@ -117,7 +83,6 @@ export class InventoryTransferService {
         const savedItem = await queryRunner.manager.save(item);
         transferItems.push(savedItem);
 
-        // 4. Generar movimiento de SALIDA inmediatamente
         await this.movementService.create(
           {
             productId: product.id,
@@ -147,40 +112,34 @@ export class InventoryTransferService {
     }
   }
 
-  async findAll(filters?: any): Promise<InventoryTransferResponseDto[]> {
+  async findAll(filters?: any): Promise<InventoryTransferListResponseDto[]> {
     const where: any = { deletedAt: IsNull() };
 
-    if (filters?.originBranchId)
-      where.originBranch = { id: filters.originBranchId };
-    if (filters?.destinationBranchId)
-      where.destinationBranch = { id: filters.destinationBranchId };
+    if (filters?.originBranchId) where.originBranch = { id: filters.originBranchId };
+    if (filters?.destinationBranchId) where.destinationBranch = { id: filters.destinationBranchId };
     if (filters?.status) where.status = filters.status;
+
+    if (filters?.startDate && filters?.endDate) {
+      where.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+    } else if (filters?.startDate) {
+      where.createdAt = MoreThanOrEqual(new Date(filters.startDate));
+    } else if (filters?.endDate) {
+      where.createdAt = LessThanOrEqual(new Date(filters.endDate));
+    }
 
     const transfers = await this.transferRepository.find({
       where,
-      relations: [
-        'originBranch',
-        'destinationBranch',
-        'items',
-        'items.product',
-        'createdBy',
-      ],
+      relations: ['originBranch', 'destinationBranch', 'createdBy'],
       order: { createdAt: 'DESC' },
     });
 
-    return transfers.map((t) => this.mapToDto(t));
+    return transfers.map((t) => this.mapToListDto(t));
   }
 
   async findOne(id: string): Promise<InventoryTransferResponseDto> {
     const transfer = await this.transferRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: [
-        'originBranch',
-        'destinationBranch',
-        'items',
-        'items.product',
-        'createdBy',
-      ],
+      relations: ['originBranch', 'destinationBranch', 'items', 'items.product', 'createdBy'],
     });
 
     if (!transfer) {
@@ -190,19 +149,10 @@ export class InventoryTransferService {
     return this.mapToDto(transfer);
   }
 
-  async updateStatus(
-    id: string,
-    dto: UpdateTransferStatusDto,
-    userId: string,
-  ): Promise<InventoryTransferResponseDto> {
+  async updateStatus(id: string, dto: UpdateTransferStatusDto, userId: string): Promise<InventoryTransferResponseDto> {
     const transfer = await this.transferRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: [
-        'originBranch',
-        'destinationBranch',
-        'items',
-        'items.product',
-      ],
+      relations: ['originBranch', 'destinationBranch', 'items', 'items.product'],
     });
 
     if (!transfer) {
@@ -213,13 +163,8 @@ export class InventoryTransferService {
       return this.mapToDto(transfer);
     }
 
-    if (
-      transfer.status === TransferStatus.RECEIVED ||
-      transfer.status === TransferStatus.CANCELLED
-    ) {
-      throw new BadRequestException(
-        `No se puede cambiar el estado de un traslado ${transfer.status}`,
-      );
+    if (transfer.status === TransferStatus.RECEIVED || transfer.status === TransferStatus.CANCELLED) {
+      throw new BadRequestException(`No se puede cambiar el estado de un traslado ${transfer.status}`);
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -280,6 +225,19 @@ export class InventoryTransferService {
     }
   }
 
+  private mapToListDto(transfer: InventoryTransfer): InventoryTransferListResponseDto {
+    const dto = new InventoryTransferListResponseDto();
+    dto.id = transfer.id;
+    dto.transferNumber = transfer.transferNumber;
+    dto.status = transfer.status;
+    dto.originBranchName = transfer.originBranch.name;
+    dto.destinationBranchName = transfer.destinationBranch.name;
+    dto.createdBy = transfer.createdBy.name;
+    dto.createdAt = transfer.createdAt;
+    dto.updatedAt = transfer.updatedAt;
+    return dto;
+  }
+
   private mapToDto(transfer: InventoryTransfer): InventoryTransferResponseDto {
     const dto = new InventoryTransferResponseDto();
     dto.id = transfer.id;
@@ -293,11 +251,27 @@ export class InventoryTransferService {
     dto.createdBy = transfer.createdBy.name;
     dto.createdAt = transfer.createdAt;
     dto.updatedAt = transfer.updatedAt;
-    dto.items = transfer.items.map((item) => ({
-      productId: item.product.id,
-      productName: item.product.name,
-      quantity: Number(item.quantity),
-    }));
+
+    let totalValue = 0;
+    dto.items = transfer.items.map((item) => {
+      const quantity = Number(item.quantity);
+      const price = Number(item.product.price);
+      const subtotal = quantity * price;
+      totalValue += subtotal;
+
+      return {
+        productId: item.product.id,
+        productName: item.product.name,
+        sku: item.product.sku,
+        quantity: quantity,
+        unitAbbreviation: item.product.unit?.abbreviation,
+        price,
+        subtotal: subtotal,
+        imageUrl: item.product.imageUrl,
+      };
+    });
+
+    dto.totalValue = totalValue;
     return dto;
   }
 

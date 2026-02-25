@@ -1,23 +1,10 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Post,
-  Put,
-  Req,
-} from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { SaleService } from '../services';
-import { CreateSaleDto, SaleResponseDto, UpdateSaleDto } from '../dto';
+import { CreateSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
+import { UpdateDetailStatusDto } from '../dto/update-detail-status.dto';
 import { SaleStatus } from '../entities';
 import { Permissions, Public } from 'src/auth/decorators';
-
-import { isSuperAdmin } from 'src/utils/user-scope.util';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 
 @Controller('sales')
 export class SaleController {
@@ -42,65 +29,76 @@ export class SaleController {
     }
 
     if (!user.branch) {
-      throw new BadRequestException(
-        'El usuario no tiene una sucursal asignada.',
-      );
+      throw new BadRequestException('El usuario no tiene una sucursal asignada.');
     }
 
-    console.log('USUARIO --->>>', user);
     dto.branchId = user.branch.id;
     return this.saleService.create(dto);
   }
 
   @Post(':id/confirm')
   @HttpCode(HttpStatus.OK)
-  confirmSale(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req,
-  ): Promise<SaleResponseDto> {
+  confirmSale(@Param('id', ParseUUIDPipe) id: string, @Req() req): Promise<SaleResponseDto> {
     const userId = req.user?.id;
     return this.saleService.confirmSale(id, undefined, userId);
   }
 
   @Post(':id/deliver')
   @HttpCode(HttpStatus.OK)
-  deliverSale(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<SaleResponseDto> {
+  deliverSale(@Param('id', ParseUUIDPipe) id: string): Promise<SaleResponseDto> {
     return this.saleService.deliverSale(id);
   }
 
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
-  cancelSale(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req,
-  ): Promise<SaleResponseDto> {
+  cancelSale(@Param('id', ParseUUIDPipe) id: string, @Req() req): Promise<SaleResponseDto> {
     const userId = req.user?.id;
     return this.saleService.cancelSale(id, userId);
   }
 
+  @Get('table')
+  @Permissions('orders.view')
+  async getTableData(@Query() filterDto: SaleFilterDto) {
+    const filters = { ...filterDto };
+    delete filters.groupBy;
+    return this.saleService.findAll(filters);
+  }
+
+  @Get('kanban')
+  @Permissions('orders.view')
+  async getKanbanData(@Query() filterDto: SaleFilterDto) {
+    return this.saleService.findAll({
+      ...filterDto,
+      groupBy: filterDto.groupBy || 'status',
+    });
+  }
+
   @Get()
   @Permissions('orders.view')
-  findAll(@Req() req): Promise<SaleResponseDto[]> {
-    const user = req.user;
-    const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
-
-    return this.saleService.findAll(branchId);
+  findAll(@Query() filterDto: SaleFilterDto): Promise<any> {
+    return this.saleService.findAll(filterDto);
   }
 
   @Get('customer/:customerId')
-  findByCustomer(
-    @Param('customerId', ParseUUIDPipe) customerId: string,
-  ): Promise<SaleResponseDto[]> {
+  findByCustomer(@Param('customerId', ParseUUIDPipe) customerId: string): Promise<SaleResponseDto[]> {
     return this.saleService.findByCustomer(customerId);
   }
 
   @Get('status/:status')
-  findByStatus(
-    @Param('status') status: SaleStatus,
-  ): Promise<SaleResponseDto[]> {
+  findByStatus(@Param('status') status: SaleStatus): Promise<SaleResponseDto[]> {
     return this.saleService.findByStatus(status);
+  }
+
+  @Get('kanban/preparation')
+  @Permissions('orders.view')
+  @HttpCode(HttpStatus.OK)
+  getPreparationWorklist(@Query('areaId', ParseUUIDPipe) areaId: string, @Query('branchId') branchId?: string) {
+    return this.saleService.findAll({
+      areaId,
+      branchId,
+      status: SaleStatus.CONFIRMED,
+      groupBy: 'preparationStatus',
+    });
   }
 
   @Get('daily/:date')
@@ -108,29 +106,13 @@ export class SaleController {
     return this.saleService.getDailySales(date);
   }
 
-  // @Get('stats')
-  // getStats(): Promise<{
-  //   total: number;
-  //   pending: number;
-  //   confirmed: number;
-  //   cancelled: number;
-  //   totalAmount: number;
-  //   averageSale: number;
-  //   byType: Record<SaleType, number>;
-  // }> {
-  //   return this.saleService.getSaleStats();
-  // }
-
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SaleResponseDto> {
     return this.saleService.findOne(id);
   }
 
   @Put(':id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateSaleDto,
-  ): Promise<SaleResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSaleDto): Promise<SaleResponseDto> {
     return this.saleService.update(id, dto);
   }
 
@@ -140,11 +122,16 @@ export class SaleController {
     return this.saleService.remove(id);
   }
 
+  @Patch('details/:detailId/status')
+  @Permissions('orders.update')
+  @HttpCode(HttpStatus.OK)
+  advanceDetailStatus(@Param('detailId', ParseUUIDPipe) detailId: string, @Body() dto: UpdateDetailStatusDto) {
+    return this.saleService.advanceDetailStatus(detailId, dto.status);
+  }
+
   @Post(':id/send-email')
   @HttpCode(HttpStatus.OK)
-  sendEmail(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<{ message: string }> {
+  sendEmail(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.saleService.sendSaleEmail(id);
   }
 }

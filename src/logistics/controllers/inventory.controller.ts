@@ -1,29 +1,10 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Put,
-  Query,
-  UseGuards,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards, ForbiddenException } from '@nestjs/common';
 import { InventoryService } from '../services';
-import {
-  CreateInventoryDto,
-  InventoryResponseDto,
-  UpdateInventoryDto,
-} from '../dto';
+import { CreateInventoryDto, InventoryResponseDto, UpdateInventoryDto } from '../dto';
 import { Public } from 'src/auth/decorators';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User } from 'src/common/decorators/user.decorator';
-import { isSuperAdmin } from 'src/utils/user-scope.util';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 
 @Controller('inventories')
 export class InventoryController {
@@ -50,34 +31,25 @@ export class InventoryController {
 
   @Get('product/:productId')
   @Public()
-  findByProduct(
-    @Param('productId', ParseUUIDPipe) productId: string,
-  ): Promise<InventoryResponseDto[]> {
+  findByProduct(@Param('productId', ParseUUIDPipe) productId: string): Promise<InventoryResponseDto[]> {
     return this.inventoryService.findByProduct(productId);
   }
 
   @Get('branch/:branchId')
   @Public()
-  findByBranch(
-    @Param('branchId', ParseUUIDPipe) branchId: string,
-  ): Promise<InventoryResponseDto[]> {
+  findByBranch(@Param('branchId', ParseUUIDPipe) branchId: string): Promise<InventoryResponseDto[]> {
     return this.inventoryService.findByBranch(branchId);
   }
 
   @Get('product/:productId/branch/:branchId')
   @Public()
-  findByProductAndBranch(
-    @Param('productId', ParseUUIDPipe) productId: string,
-    @Param('branchId', ParseUUIDPipe) branchId: string,
-  ): Promise<InventoryResponseDto> {
+  findByProductAndBranch(@Param('productId', ParseUUIDPipe) productId: string, @Param('branchId', ParseUUIDPipe) branchId: string): Promise<InventoryResponseDto> {
     return this.inventoryService.findByProductAndBranch(productId, branchId);
   }
 
   @Get('low-stock')
   @Public()
-  getLowStock(
-    @Query('branchId') branchId?: string,
-  ): Promise<InventoryResponseDto[]> {
+  getLowStock(@Query('branchId') branchId?: string): Promise<InventoryResponseDto[]> {
     return this.inventoryService.getLowStock(branchId);
   }
 
@@ -94,18 +66,13 @@ export class InventoryController {
 
   @Get(':id')
   @Public()
-  findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<InventoryResponseDto> {
+  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryResponseDto> {
     return this.inventoryService.findOne(id);
   }
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateInventoryDto,
-  ): Promise<InventoryResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateInventoryDto): Promise<InventoryResponseDto> {
     return this.inventoryService.update(id, dto);
   }
 
@@ -119,9 +86,7 @@ export class InventoryController {
   @Patch(':id/restore')
   @Public()
   @HttpCode(HttpStatus.OK)
-  restore(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<InventoryResponseDto> {
+  restore(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryResponseDto> {
     return this.inventoryService.restore(id);
   }
 }

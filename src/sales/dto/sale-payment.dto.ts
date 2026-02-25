@@ -1,14 +1,4 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  IsUUID,
-  IsNumber,
-  IsEnum,
-  IsDateString,
-  Min,
-  MaxLength,
-} from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, IsDateString, IsBoolean, Min, MaxLength } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { PaymentStatus } from '../entities';
@@ -51,9 +41,13 @@ export class CreateSalePaymentDto {
   referenceNumber?: string;
 
   @IsOptional()
+  @IsUUID()
+  bankAccountId?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(50)
-  bankAccount?: string;
+  manualBankAccount?: string;
 
   @IsOptional()
   @IsEnum(PaymentStatus)
@@ -62,6 +56,10 @@ export class CreateSalePaymentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isDownPayment?: boolean;
 }
 
 export class UpdateSalePaymentDto extends PartialType(CreateSalePaymentDto) {}
@@ -86,10 +84,17 @@ export class SalePaymentResponseDto extends BaseEntity {
   referenceNumber: string;
 
   @Expose()
-  bankAccount: string;
+  @Type(() => Object)
+  bankAccount: any;
+
+  @Expose()
+  manualBankAccount: string;
 
   @Expose()
   status: PaymentStatus;
+
+  @Expose()
+  isDownPayment: boolean;
 
   @Expose()
   notes: string;

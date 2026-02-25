@@ -1,4 +1,3 @@
-//prettier-ignore
 import { IsString, IsOptional, IsNotEmpty, IsEmail, IsBoolean, IsArray, MinLength, MaxLength, IsUUID } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { PermissionResponseDto, RoleResponseDto } from '.';
@@ -60,7 +59,7 @@ export class UserResponseDto extends BaseEntity {
   roles: RoleResponseDto[];
 
   @Expose()
-  @Type(() => BranchResponseDto) // 🔥 Nuevo campo
+  @Type(() => BranchResponseDto)
   branch: BranchResponseDto;
 
   @Expose()

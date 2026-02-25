@@ -16,9 +16,7 @@ export class PdfService {
       });
 
       // --- Header ---
-      doc
-        .fontSize(20)
-        .text('SISTEMA POS', { align: 'center', underline: true });
+      doc.fontSize(20).text('SISTEMA POS', { align: 'center', underline: true });
       doc.fontSize(10).text('Calle Ficticia 123, Ciudad', { align: 'center' });
       doc.text('Tel: 2222-3333', { align: 'center' });
       doc.text('NIT: 1234567-8', { align: 'center' });
@@ -32,12 +30,8 @@ export class PdfService {
       doc.fontSize(12).text(`N° Factura: ${sale.invoiceNumber}`);
       doc.text(`Fecha: ${new Date(sale.date).toLocaleString()}`);
 
-      const customerName = sale.customer
-        ? sale.customer.name
-        : sale.guestCustomer?.name || 'Consumidor Final';
-      const customerNit = sale.customer
-        ? sale.customer.nit
-        : sale.guestCustomer?.nit || 'C/F';
+      const customerName = sale.customer ? sale.customer.name : sale.guestCustomer?.name || 'Consumidor Final';
+      const customerNit = sale.customer ? sale.customer.nit : sale.guestCustomer?.nit || 'C/F';
 
       doc.text(`Cliente: ${customerName}`);
       doc.text(`NIT Cliente: ${customerNit}`);
@@ -86,11 +80,9 @@ export class PdfService {
       doc.fontSize(14).text('TOTAL:', totalX, doc.y, { continued: true });
       doc.text(`Q${Number(sale.total).toFixed(2)}`, 450, doc.y);
       doc.moveDown();
-      doc
-        .fontSize(10)
-        .text('------------------------------------------------------------', {
-          align: 'center',
-        });
+      doc.fontSize(10).text('------------------------------------------------------------', {
+        align: 'center',
+      });
       doc.moveDown();
 
       // --- Footer ---

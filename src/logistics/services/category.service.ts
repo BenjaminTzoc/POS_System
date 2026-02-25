@@ -1,18 +1,9 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Category } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { UnitService } from '.';
-import {
-  CategoryResponseDto,
-  CreateCategoryDto,
-  UpdateCategoryDto,
-} from '../dto';
+import { CategoryResponseDto, CreateCategoryDto, UpdateCategoryDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -24,7 +15,6 @@ export class CategoryService {
   ) {}
 
   async create(dto: CreateCategoryDto): Promise<CategoryResponseDto> {
-    // Verificar si la categoría ya existe
     const existingCategory = await this.categoryRepository.findOne({
       where: { name: dto.name },
       withDeleted: false,
@@ -36,14 +26,11 @@ export class CategoryService {
 
     let defaultUnit: any = null;
 
-    // Si se proporciona defaultUnitId, validar que la unidad existe
     if (dto.defaultUnitId) {
       try {
         defaultUnit = await this.unitService.findOne(dto.defaultUnitId);
       } catch (error) {
-        throw new BadRequestException(
-          `La unidad con ID ${dto.defaultUnitId} no existe`,
-        );
+        throw new BadRequestException(`La unidad con ID ${dto.defaultUnitId} no existe`);
       }
     }
 
@@ -57,9 +44,7 @@ export class CategoryService {
     return plainToInstance(CategoryResponseDto, savedCategory);
   }
 
-  async findAll(
-    includeDeleted: boolean = false,
-  ): Promise<CategoryResponseDto[]> {
+  async findAll(includeDeleted: boolean = false): Promise<CategoryResponseDto[]> {
     const categories = await this.categoryRepository.find({
       where: includeDeleted ? {} : { deletedAt: IsNull() },
       withDeleted: includeDeleted,
@@ -69,10 +54,7 @@ export class CategoryService {
     return plainToInstance(CategoryResponseDto, categories);
   }
 
-  async findOne(
-    id: string,
-    includeDeleted: boolean = false,
-  ): Promise<CategoryResponseDto> {
+  async findOne(id: string, includeDeleted: boolean = false): Promise<CategoryResponseDto> {
     const category = await this.categoryRepository.findOne({
       where: { id },
       withDeleted: includeDeleted,
@@ -86,10 +68,7 @@ export class CategoryService {
     return plainToInstance(CategoryResponseDto, category);
   }
 
-  async update(
-    id: string,
-    dto: UpdateCategoryDto,
-  ): Promise<CategoryResponseDto> {
+  async update(id: string, dto: UpdateCategoryDto): Promise<CategoryResponseDto> {
     const category = await this.categoryRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['defaultUnit'],
@@ -99,7 +78,6 @@ export class CategoryService {
       throw new NotFoundException(`Categoría con ID ${id} no encontrada`);
     }
 
-    // Verificar si el nuevo nombre ya existe
     if (dto.name && dto.name !== category.name) {
       const existingCategory = await this.categoryRepository.findOne({
         where: { name: dto.name, deletedAt: IsNull() },
@@ -110,7 +88,6 @@ export class CategoryService {
       }
     }
 
-    // Manejar la unidad por defecto
     let defaultUnit: any = category.defaultUnit;
 
     if (dto.defaultUnitId !== undefined) {
@@ -120,9 +97,7 @@ export class CategoryService {
         try {
           defaultUnit = await this.unitService.findOne(dto.defaultUnitId);
         } catch (error) {
-          throw new BadRequestException(
-            `La unidad con ID ${dto.defaultUnitId} no existe`,
-          );
+          throw new BadRequestException(`La unidad con ID ${dto.defaultUnitId} no existe`);
         }
       }
     }
@@ -147,11 +122,8 @@ export class CategoryService {
       throw new NotFoundException(`Categoría con ID ${id} no encontrada`);
     }
 
-    // Verificar si la categoría tiene productos asociados
     if (category.products && category.products.length > 0) {
-      throw new ConflictException(
-        'No se puede eliminar la categoría porque tiene productos asociados',
-      );
+      throw new ConflictException('No se puede eliminar la categoría porque tiene productos asociados');
     }
 
     await this.categoryRepository.softRemove(category);
@@ -170,9 +142,7 @@ export class CategoryService {
     }
 
     if (!category.deletedAt) {
-      throw new ConflictException(
-        `La categoría con ID ${id} no está eliminada`,
-      );
+      throw new ConflictException(`La categoría con ID ${id} no está eliminada`);
     }
 
     category.deletedAt = null;

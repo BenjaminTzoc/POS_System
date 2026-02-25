@@ -1,24 +1,11 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  IsUUID,
-  IsNumber,
-  IsEnum,
-  Min,
-  IsDateString,
-} from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, Min, IsDateString } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { ProductResponseDto } from './product.dto';
 import { BranchResponseDto } from './branch.dto';
 import { InventoryResponseDto } from './inventory.dto';
 import { UserResponseDto } from 'src/auth/dto/user.dto';
-import {
-  MovementType,
-  MovementStatus,
-  MovementConcept,
-} from '../entities/inventory-movement.entity';
+import { MovementType, MovementStatus, MovementConcept } from '../entities/inventory-movement.entity';
 
 export class CreateInventoryMovementDto {
   @IsNotEmpty()

@@ -31,6 +31,9 @@ export class Customer extends BaseEntity {
   @Column({ name: 'total_purchases', type: 'decimal', precision: 12, scale: 2, default: 0 })
   totalPurchases: number;
 
+  @Column({ name: 'credit_limit', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  creditLimit: number;
+
   @Column({ name: 'last_purchase_date', type: 'timestamp', nullable: true })
   lastPurchaseDate: Date | null;
 

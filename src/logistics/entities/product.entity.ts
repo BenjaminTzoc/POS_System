@@ -1,6 +1,7 @@
 import { Entity, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Category } from './category.entity';
+import { Area } from './area.entity';
 import { Unit } from './unit.entity';
 import { Inventory } from './inventory.entity';
 import { InventoryMovement } from './inventory-movement.entity';
@@ -42,6 +43,10 @@ export class Product extends BaseEntity {
   @JoinColumn({ name: 'unit_id' })
   unit?: Unit;
 
+  @ManyToOne(() => Area, { eager: true, nullable: true })
+  @JoinColumn({ name: 'area_id' })
+  area?: Area;
+
   @OneToMany(() => Inventory, (inventory) => inventory.product)
   inventories: Inventory[];
 
@@ -51,10 +56,10 @@ export class Product extends BaseEntity {
   @Column({ type: 'boolean', default: true })
   manageStock: boolean;
 
-  @Column({ 
-    type: 'enum', 
-    enum: StockAvailability, 
-    default: StockAvailability.IN_STOCK 
+  @Column({
+    type: 'enum',
+    enum: StockAvailability,
+    default: StockAvailability.IN_STOCK,
   })
   stockAvailability: StockAvailability;
 

@@ -1,16 +1,8 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Supplier } from '../entities';
 import { IsNull, Repository } from 'typeorm';
-import {
-  CreateSupplierDto,
-  SupplierResponseDto,
-  UpdateSupplierDto,
-} from '../dto';
+import { CreateSupplierDto, SupplierResponseDto, UpdateSupplierDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -21,7 +13,6 @@ export class SupplierService {
   ) {}
 
   async create(dto: CreateSupplierDto): Promise<SupplierResponseDto> {
-    // Verificar si el NIT ya existe (incluyendo eliminados)
     const existingNit = await this.supplierRepository.findOne({
       where: { nit: dto.nit },
       withDeleted: true,
@@ -29,9 +20,7 @@ export class SupplierService {
 
     if (existingNit) {
       if (existingNit.deletedAt) {
-        throw new ConflictException(
-          `El NIT '${dto.nit}' pertenece a un proveedor inactivo. Considere reactivarlo o contacte con el administrador.`,
-        );
+        throw new ConflictException(`El NIT '${dto.nit}' pertenece a un proveedor inactivo. Considere reactivarlo o contacte con el administrador.`);
       }
       throw new ConflictException(`El NIT ${dto.nit} ya está registrado`);
     }
@@ -41,9 +30,7 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, savedSupplier);
   }
 
-  async findAll(
-    includeDeleted: boolean = false,
-  ): Promise<SupplierResponseDto[]> {
+  async findAll(includeDeleted: boolean = false): Promise<SupplierResponseDto[]> {
     const suppliers = await this.supplierRepository.find({
       withDeleted: includeDeleted,
       order: { name: 'ASC' },
@@ -51,10 +38,7 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, suppliers);
   }
 
-  async findOne(
-    id: string,
-    includeDeleted: boolean = false,
-  ): Promise<SupplierResponseDto> {
+  async findOne(id: string, includeDeleted: boolean = false): Promise<SupplierResponseDto> {
     const supplier = await this.supplierRepository.findOne({
       where: { id },
       withDeleted: includeDeleted,
@@ -79,10 +63,7 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, supplier);
   }
 
-  async update(
-    id: string,
-    dto: UpdateSupplierDto,
-  ): Promise<SupplierResponseDto> {
+  async update(id: string, dto: UpdateSupplierDto): Promise<SupplierResponseDto> {
     const supplier = await this.supplierRepository.findOne({
       where: { id, deletedAt: IsNull() },
     });
@@ -91,7 +72,6 @@ export class SupplierService {
       throw new NotFoundException(`Proveedor con ID ${id} no encontrado`);
     }
 
-    // Verificar si el nuevo NIT ya existe (incluyendo eliminados)
     if (dto.nit && dto.nit !== supplier.nit) {
       const existingNit = await this.supplierRepository.findOne({
         where: { nit: dto.nit },
@@ -100,9 +80,7 @@ export class SupplierService {
 
       if (existingNit) {
         if (existingNit.deletedAt) {
-          throw new ConflictException(
-            `El NIT '${dto.nit}' pertenece a un proveedor inactivo. Considere reactivarlo o contacte con el administrador.`,
-          );
+          throw new ConflictException(`El NIT '${dto.nit}' pertenece a un proveedor inactivo. Considere reactivarlo o contacte con el administrador.`);
         }
         throw new ConflictException(`El NIT ${dto.nit} ya está registrado`);
       }
@@ -123,11 +101,8 @@ export class SupplierService {
       throw new NotFoundException(`Proveedor con ID ${id} no encontrado`);
     }
 
-    // Verificar si el proveedor tiene compras asociadas
     if (supplier.purchases && supplier.purchases.length > 0) {
-      throw new ConflictException(
-        'No se puede eliminar el proveedor porque tiene compras asociadas',
-      );
+      throw new ConflictException('No se puede eliminar el proveedor porque tiene compras asociadas');
     }
 
     await this.supplierRepository.softRemove(supplier);
@@ -145,9 +120,7 @@ export class SupplierService {
     }
 
     if (!supplier.deletedAt) {
-      throw new ConflictException(
-        `El proveedor con ID ${id} no está eliminado`,
-      );
+      throw new ConflictException(`El proveedor con ID ${id} no está eliminado`);
     }
 
     supplier.deletedAt = null;
@@ -155,10 +128,7 @@ export class SupplierService {
     return plainToInstance(SupplierResponseDto, restoredSupplier);
   }
 
-  async searchSuppliers(
-    query: string,
-    includeDeleted: boolean = false,
-  ): Promise<SupplierResponseDto[]> {
+  async searchSuppliers(query: string, includeDeleted: boolean = false): Promise<SupplierResponseDto[]> {
     const queryBuilder = this.supplierRepository.createQueryBuilder('supplier');
 
     if (!includeDeleted) {
@@ -168,10 +138,7 @@ export class SupplierService {
     }
 
     const suppliers = await queryBuilder
-      .andWhere(
-        '(supplier.name ILIKE :query OR supplier.nit ILIKE :query OR supplier.contactName ILIKE :query OR supplier.email ILIKE :query)',
-        { query: `%${query}%` },
-      )
+      .andWhere('(supplier.name ILIKE :query OR supplier.nit ILIKE :query OR supplier.contactName ILIKE :query OR supplier.email ILIKE :query)', { query: `%${query}%` })
       .orderBy('supplier.name', 'ASC')
       .getMany();
 

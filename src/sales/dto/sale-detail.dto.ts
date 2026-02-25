@@ -1,7 +1,8 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, Max, IsEnum } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { ProductResponseDto } from 'src/logistics/dto';
+import { ProductResponseDto, AreaResponseDto } from 'src/logistics/dto';
+import { DiscountType } from '../entities';
 
 export class CreateSaleDetailDto {
   @IsNotEmpty()
@@ -30,6 +31,10 @@ export class CreateSaleDetailDto {
   discountAmount?: number;
 
   @IsOptional()
+  @IsEnum(DiscountType)
+  discountType?: DiscountType;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
@@ -44,6 +49,15 @@ export class CreateSaleDetailDto {
   @IsNumber()
   @Min(0)
   lineTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  originalPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 export class UpdateSaleDetailDto {
@@ -69,6 +83,10 @@ export class UpdateSaleDetailDto {
   discountAmount?: number;
 
   @IsOptional()
+  @IsEnum(DiscountType)
+  discountType?: DiscountType;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
@@ -83,9 +101,21 @@ export class UpdateSaleDetailDto {
   @IsNumber()
   @Min(0)
   lineTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  originalPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 export class SaleDetailResponseDto extends BaseEntity {
+  @Expose()
+  declare id: string;
+
   @Expose()
   @Type(() => ProductResponseDto)
   product: ProductResponseDto;
@@ -103,6 +133,9 @@ export class SaleDetailResponseDto extends BaseEntity {
   discountAmount: number;
 
   @Expose()
+  discountType: DiscountType;
+
+  @Expose()
   taxPercentage: number;
 
   @Expose()
@@ -110,6 +143,19 @@ export class SaleDetailResponseDto extends BaseEntity {
 
   @Expose()
   lineTotal: number;
+
+  @Expose()
+  originalPrice: number;
+
+  @Expose()
+  notes: string;
+
+  @Expose()
+  @Type(() => AreaResponseDto)
+  currentArea: AreaResponseDto | null;
+
+  @Expose()
+  preparationStatus: string;
 
   @Expose()
   declare createdAt: Date;

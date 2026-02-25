@@ -2,11 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Permission, Role, User } from './entities';
 import { AuthService } from './auth.service';
-import {
-  PermissionsController,
-  RolesController,
-  UsersController,
-} from './controllers';
+import { PermissionsController, RolesController, UsersController } from './controllers';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';

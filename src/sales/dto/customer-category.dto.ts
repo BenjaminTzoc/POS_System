@@ -1,13 +1,5 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  IsNumber,
-  IsBoolean,
-  Min,
-  Max,
-} from 'class-validator';
-import { Exclude, Expose } from 'class-transformer';
+import { IsString, IsOptional, IsNotEmpty, IsNumber, IsBoolean, Min, Max } from 'class-validator';
+import { Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 
 export class CreateCustomerCategoryDto {
@@ -33,6 +25,11 @@ export class CreateCustomerCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  defaultCreditLimit?: number;
 }
 
 export class UpdateCustomerCategoryDto {
@@ -58,6 +55,11 @@ export class UpdateCustomerCategoryDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  defaultCreditLimit?: number;
 }
 
 export class CustomerCategoryResponseDto extends BaseEntity {
@@ -75,6 +77,9 @@ export class CustomerCategoryResponseDto extends BaseEntity {
 
   @Expose()
   isActive: boolean;
+
+  @Expose()
+  defaultCreditLimit: number;
 
   @Expose()
   declare createdAt: Date;

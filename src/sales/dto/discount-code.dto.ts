@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, IsDateString, Min, Max, IsBoolean } from 'class-validator';
-import { Type, Exclude, Expose } from 'class-transformer';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, IsDateString, Min, IsBoolean } from 'class-validator';
+import { Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { DiscountScope, DiscountType } from '../entities';
 

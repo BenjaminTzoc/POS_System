@@ -1,24 +1,8 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import { Permission, Role, User } from './entities';
-import {
-  CreatePermissionDto,
-  CreateRoleDto,
-  CreateUserDto,
-  PermissionResponseDto,
-  RoleResponseDto,
-  UpdatePermissionDto,
-  UpdateRoleDto,
-  UpdateUserDto,
-  UserResponseDto,
-} from './dto';
+import { CreatePermissionDto, CreateRoleDto, CreateUserDto, PermissionResponseDto, RoleResponseDto, UpdatePermissionDto, UpdateRoleDto, UpdateUserDto, UserResponseDto } from './dto';
 import { plainToInstance } from 'class-transformer';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
@@ -41,10 +25,7 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  // Permissions CRUD
-  async createPermission(
-    dto: CreatePermissionDto,
-  ): Promise<PermissionResponseDto> {
+  async createPermission(dto: CreatePermissionDto): Promise<PermissionResponseDto> {
     const existingPermission = await this.permissionRepository.findOne({
       where: { name: dto.name },
       withDeleted: false,
@@ -79,10 +60,7 @@ export class AuthService {
     return plainToInstance(PermissionResponseDto, permission);
   }
 
-  async updatePermission(
-    id: string,
-    dto: UpdatePermissionDto,
-  ): Promise<PermissionResponseDto> {
+  async updatePermission(id: string, dto: UpdatePermissionDto): Promise<PermissionResponseDto> {
     const permission = await this.permissionRepository.findOne({
       where: { id, deletedAt: IsNull() },
     });
@@ -138,9 +116,7 @@ export class AuthService {
     return plainToInstance(PermissionResponseDto, restoredPermission);
   }
 
-  //Roles CRUD
   async createRole(dto: CreateRoleDto): Promise<RoleResponseDto> {
-    // Verificar si el rol ya existe
     const existingRole = await this.roleRepository.findOne({
       where: { name: dto.name },
       withDeleted: false,
@@ -150,7 +126,6 @@ export class AuthService {
       throw new ConflictException(`El rol '${dto.name}' ya existe`);
     }
 
-    // Buscar permisos si se proporcionan
     let permissions: Permission[] = [];
 
     if (dto.isSuperAdmin) {
@@ -163,9 +138,7 @@ export class AuthService {
       });
 
       if (permissions.length !== dto.permissionIds.length) {
-        throw new BadRequestException(
-          'Algunos permisos no existen o están eliminados',
-        );
+        throw new BadRequestException('Algunos permisos no existen o están eliminados');
       }
     }
 
@@ -211,7 +184,6 @@ export class AuthService {
       throw new NotFoundException(`El rol con ID ${id} al que intenta modificar no existe`);
     }
 
-    // Verificar si el nuevo nombre ya existe
     if (dto.name && dto.name !== role.name) {
       const existingRole = await this.roleRepository.findOne({
         where: { name: dto.name, deletedAt: IsNull() },
@@ -222,16 +194,13 @@ export class AuthService {
       }
     }
 
-    // Actualizar permisos si se proporcionan
     if (dto.permissionIds) {
       const permissions = await this.permissionRepository.find({
         where: { id: In(dto.permissionIds), deletedAt: IsNull() },
       });
 
       if (permissions.length !== dto.permissionIds.length) {
-        throw new BadRequestException(
-          'Algunos permisos no existen o están eliminados',
-        );
+        throw new BadRequestException('Algunos permisos no existen o están eliminados');
       }
 
       role.permissions = permissions;
@@ -254,14 +223,11 @@ export class AuthService {
       });
 
       if (permissions.length !== dto.permissionIds.length) {
-        throw new BadRequestException(
-          'Algunos permisos no existen o están eliminados',
-        );
+        throw new BadRequestException('Algunos permisos no existen o están eliminados');
       }
       role.permissions = permissions;
     }
 
-    // Actualizar otros campos
     if (dto.name) role.name = dto.name;
     if (dto.description !== undefined) role.description = dto.description;
 
@@ -302,9 +268,7 @@ export class AuthService {
     return plainToInstance(RoleResponseDto, restoredRole);
   }
 
-  //Users CRUD
   async createUser(dto: CreateUserDto): Promise<UserResponseDto> {
-    // Verificar si el email ya existe
     const existingUser = await this.userRepository.findOne({
       where: { email: dto.email },
       withDeleted: false,
@@ -320,9 +284,7 @@ export class AuthService {
     });
 
     if (roles.length !== dto.roleIds.length) {
-      throw new BadRequestException(
-        'Algunos roles no existen o están eliminados',
-      );
+      throw new BadRequestException('Algunos roles no existen o están eliminados');
     }
 
     const isSuperAdmin = roles.some((r) => r.isSuperAdmin);
@@ -331,9 +293,7 @@ export class AuthService {
 
     if (!isSuperAdmin) {
       if (!dto.branchId) {
-        throw new BadRequestException(
-          'La sucursal es obligatoria para este usuario',
-        );
+        throw new BadRequestException('La sucursal es obligatoria para este usuario');
       }
 
       branch = await this.branchRepository.findOne({
@@ -345,7 +305,6 @@ export class AuthService {
       }
     }
 
-    // Buscar permisos si se proporcionan
     let permissions: Permission[] = [];
 
     if (dto.permissionIds?.length) {
@@ -420,20 +379,16 @@ export class AuthService {
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     }
 
-    // ====== VALIDAR EMAIL NUEVO ======
     if (dto.email && dto.email !== user.email) {
       const existingUser = await this.userRepository.findOne({
         where: { email: dto.email, deletedAt: IsNull() },
       });
 
       if (existingUser) {
-        throw new ConflictException(
-          `El email '${dto.email}' ya está registrado`,
-        );
+        throw new ConflictException(`El email '${dto.email}' ya está registrado`);
       }
     }
 
-    // ====== ACTUALIZAR ROLES ======
     if (dto.roleIds) {
       const roles = await this.roleRepository.find({
         where: { id: In(dto.roleIds), deletedAt: IsNull() },
@@ -441,9 +396,7 @@ export class AuthService {
       });
 
       if (roles.length !== dto.roleIds.length) {
-        throw new BadRequestException(
-          'Algunos roles no existen o están eliminados',
-        );
+        throw new BadRequestException('Algunos roles no existen o están eliminados');
       }
 
       user.roles = roles;
@@ -485,7 +438,6 @@ export class AuthService {
 
     user.permissions = [...directPermissions, ...rolePermissions];
 
-    // Actualizar otros campos
     if (dto.name) user.name = dto.name;
     if (dto.email) user.email = dto.email;
 
@@ -538,10 +490,7 @@ export class AuthService {
     });
   }
 
-  async validateUser(
-    email: string,
-    password: string,
-  ): Promise<{ user?: UserResponseDto; accessToken: string }> {
+  async validateUser(email: string, password: string): Promise<{ user?: UserResponseDto; accessToken: string }> {
     const user = await this.findUserByEmail(email);
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -549,7 +498,6 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // Actualizar último login
     await this.updateLastLogin(user.id);
 
     const { accessToken } = await this.generateJwt(user);
@@ -572,12 +520,7 @@ export class AuthService {
       isSuperAdmin: userWithRelations?.roles.some((r) => r.isSuperAdmin),
       branchId: userWithRelations?.branch?.id ?? null,
       roles: userWithRelations?.roles.map((r) => r.name),
-      permissions: [
-        ...userWithRelations!.permissions.map((p) => p.name),
-        ...userWithRelations!.roles.flatMap((r) =>
-          r.permissions.map((p) => p.name),
-        ),
-      ],
+      permissions: [...userWithRelations!.permissions.map((p) => p.name), ...userWithRelations!.roles.flatMap((r) => r.permissions.map((p) => p.name))],
     };
 
     const accessToken = this.jwtService.sign(payload);

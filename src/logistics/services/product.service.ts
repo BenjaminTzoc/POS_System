@@ -1,22 +1,14 @@
-import {
-  BadRequestException,
-  ConflictException,
-  forwardRef,
-  Inject,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Branch, Inventory, Product } from '../entities';
 import { SaleStatus } from 'src/sales/entities';
 import { IsNull, Repository } from 'typeorm';
 import { CategoryService } from './category.service';
 import { UnitService } from './unit.service';
-import { CreateProductDto, ProductResponseDto, UpdateProductDto } from '../dto';
+import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { FilesService } from './files.service';
 import { StockAvailability } from '../entities/product.entity';
-import { InventoryService } from './inventory.service';
 
 @Injectable()
 export class ProductService {
@@ -30,16 +22,10 @@ export class ProductService {
 
     private readonly categoryService: CategoryService,
     private readonly unitService: UnitService,
-    private readonly fileService: FilesService,
-    @Inject(forwardRef(() => InventoryService))
-    private readonly inventoryService: InventoryService,
+    private readonly fileService: FilesService
   ) {}
 
-  async createWithInventory(
-    dto: CreateProductDto,
-    image?: Express.Multer.File,
-  ): Promise<ProductResponseDto> {
-    // Verificar si el SKU ya existe (incluso en eliminados)
+  async createWithInventory(dto: CreateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
     const existingSku = await this.productRepository.findOne({
       where: { sku: dto.sku },
       withDeleted: true,
@@ -47,24 +33,18 @@ export class ProductService {
 
     if (existingSku) {
       if (existingSku.deletedAt) {
-        throw new ConflictException(
-          `El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}). Restaure el producto o use otro SKU.`,
-        );
+        throw new ConflictException(`El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}). Restaure el producto o use otro SKU.`);
       }
       throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
     }
 
-    // Verificar si el código de barras ya existe (si se proporciona)
     if (dto.barcode) {
       const existingBarcode = await this.productRepository.findOne({
         where: { barcode: dto.barcode },
         withDeleted: false,
       });
 
-      if (existingBarcode)
-        throw new ConflictException(
-          `El código de barras '${dto.barcode}' ya está en uso`,
-        );
+      if (existingBarcode) throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
     }
 
     let imageUrl: string | undefined;
@@ -72,23 +52,16 @@ export class ProductService {
       imageUrl = await this.fileService.saveProductImage(image);
     }
 
-    // Validar y obtener la categoría y unidad si se proporcionan
     let category: any = null;
     let unit: any = null;
     if (dto.categoryId) {
-      category = await this.categoryService
-        .findOne(dto.categoryId)
-        .catch(() => {
-          throw new BadRequestException(
-            `La categoría con ID ${dto.categoryId} no existe`,
-          );
-        });
+      category = await this.categoryService.findOne(dto.categoryId).catch(() => {
+        throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
+      });
     }
     if (dto.unitId) {
       unit = await this.unitService.findOne(dto.unitId).catch(() => {
-        throw new BadRequestException(
-          `La unidad con ID ${dto.unitId} no existe`,
-        );
+        throw new BadRequestException(`La unidad con ID ${dto.unitId} no existe`);
       });
     }
 
@@ -116,10 +89,7 @@ export class ProductService {
           where: { id: stockItem.branchId },
           withDeleted: false,
         });
-        if (!branch)
-          throw new NotFoundException(
-            `Sucursal con ID ${stockItem.branchId} no encontrada`,
-          );
+        if (!branch) throw new NotFoundException(`Sucursal con ID ${stockItem.branchId} no encontrada`);
 
         const inventory = this.inventoryRepository.create({
           product: savedProduct,
@@ -138,10 +108,7 @@ export class ProductService {
     });
   }
 
-  async findAll(
-    branchId?: string,
-    includeDeleted: boolean = false,
-  ): Promise<ProductResponseDto[]> {
+  async findAll(branchId?: string, includeDeleted: boolean = false): Promise<ProductResponseDto[]> {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -180,11 +147,7 @@ export class ProductService {
     );
   }
 
-  async findOne(
-    id: string,
-    branchId?: string,
-    includeDeleted: boolean = false,
-  ): Promise<ProductResponseDto> {
+  async findOne(id: string, branchId?: string, includeDeleted: boolean = false): Promise<ProductResponseDto> {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -209,9 +172,7 @@ export class ProductService {
       throw new NotFoundException(`Producto con ID ${id} no encontrado`);
     }
 
-    const stock =
-      product.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) ||
-      0;
+    const stock = product.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
 
     return plainToInstance(
       ProductResponseDto,
@@ -254,19 +215,13 @@ export class ProductService {
     });
 
     if (!product) {
-      throw new NotFoundException(
-        `Producto con código de barras ${barcode} no encontrado`,
-      );
+      throw new NotFoundException(`Producto con código de barras ${barcode} no encontrado`);
     }
 
     return plainToInstance(ProductResponseDto, product);
   }
 
-  async update(
-    id: string,
-    dto: UpdateProductDto,
-    image?: Express.Multer.File,
-  ): Promise<ProductResponseDto> {
+  async update(id: string, dto: UpdateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
     const product = await this.productRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['category', 'unit', 'category.defaultUnit'],
@@ -276,7 +231,6 @@ export class ProductService {
       throw new NotFoundException(`Producto con ID ${id} no encontrado`);
     }
 
-    // Verificar si el nuevo SKU ya existe (incluso en eliminados)
     if (dto.sku && dto.sku !== product.sku) {
       const existingSku = await this.productRepository.findOne({
         where: { sku: dto.sku },
@@ -285,59 +239,39 @@ export class ProductService {
 
       if (existingSku) {
         if (existingSku.deletedAt) {
-          throw new ConflictException(
-            `El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}).`,
-          );
+          throw new ConflictException(`El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}).`);
         }
         throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
       }
     }
 
-    // Verificar si el nuevo código de barras ya existe
     if (dto.barcode && dto.barcode !== product.barcode) {
       const existingBarcode = await this.productRepository.findOne({
         where: { barcode: dto.barcode, deletedAt: IsNull() },
       });
 
       if (existingBarcode) {
-        throw new ConflictException(
-          `El código de barras '${dto.barcode}' ya está en uso`,
-        );
+        throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
       }
     }
 
-    // Validar que el precio sea mayor o igual al costo
-    if (
-      dto.price !== undefined &&
-      dto.cost !== undefined &&
-      dto.price < dto.cost
-    ) {
-      throw new BadRequestException(
-        'El precio debe ser mayor o igual al costo',
-      );
+    if (dto.price !== undefined && dto.cost !== undefined && dto.price < dto.cost) {
+      throw new BadRequestException('El precio debe ser mayor o igual al costo');
     } else if (dto.price !== undefined && dto.price < product.cost) {
-      throw new BadRequestException(
-        'El precio debe ser mayor o igual al costo',
-      );
+      throw new BadRequestException('El precio debe ser mayor o igual al costo');
     } else if (dto.cost !== undefined && product.price < dto.cost) {
-      throw new BadRequestException(
-        'El precio debe ser mayor o igual al costo',
-      );
+      throw new BadRequestException('El precio debe ser mayor o igual al costo');
     }
 
-    // MANEJO DE IMAGEN
     let imageUrl = product.imageUrl;
     if (image) {
-      // Eliminar imagen anterior si existe
       if (product.imageUrl) {
         await this.fileService.deleteProductImage(product.imageUrl);
       }
 
-      // Guardar nueva imagen
       imageUrl = await this.fileService.saveProductImage(image);
     }
 
-    // Manejar categoría
     let category: any = product.category;
     if (dto.categoryId !== undefined) {
       if (dto.categoryId === null) {
@@ -346,14 +280,11 @@ export class ProductService {
         try {
           category = await this.categoryService.findOne(dto.categoryId);
         } catch (error) {
-          throw new BadRequestException(
-            `La categoría con ID ${dto.categoryId} no existe`,
-          );
+          throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
         }
       }
     }
 
-    // Manejar unidad
     let unit: any = product.unit;
     if (dto.unitId !== undefined) {
       if (dto.unitId === null) {
@@ -362,14 +293,10 @@ export class ProductService {
         try {
           unit = await this.unitService.findOne(dto.unitId);
         } catch (error) {
-          throw new BadRequestException(
-            `La unidad con ID ${dto.unitId} no existe`,
-          );
+          throw new BadRequestException(`La unidad con ID ${dto.unitId} no existe`);
         }
       }
     }
-
-    console.log('DTO --->', dto);
 
     Object.assign(product, {
       name: dto.name ?? product.name,
@@ -401,11 +328,8 @@ export class ProductService {
       throw new NotFoundException(`Producto con ID ${id} no encontrado`);
     }
 
-    // Verificar si el producto tiene inventarios asociados
     if (product.inventories && product.inventories.length > 0) {
-      throw new ConflictException(
-        'No se puede eliminar el producto porque tiene inventarios asociados',
-      );
+      throw new ConflictException('No se puede eliminar el producto porque tiene inventarios asociados');
     }
 
     await this.productRepository.softRemove(product);
@@ -432,73 +356,37 @@ export class ProductService {
     return plainToInstance(ProductResponseDto, restoredProduct);
   }
 
-  async searchProducts(
-    query: string,
-    branchId?: string,
-    includeDeleted: boolean = false,
-  ): Promise<ProductResponseDto[]> {
+  async searchProducts(query: string, branchId?: string, includeDeleted: boolean = false): Promise<ProductResponseDto[]> {
     const queryBuilder = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.unit', 'unit')
       .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
       .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL')
-      .andWhere(
-        '(product.name ILIKE :query OR product.sku ILIKE :query OR product.barcode ILIKE :query OR product.description ILIKE :query)',
-        { query: `%${query}%` },
-      );
+      .andWhere('(product.name ILIKE :query OR product.sku ILIKE :query OR product.barcode ILIKE :query OR product.description ILIKE :query)', { query: `%${query}%` });
 
     if (includeDeleted) {
       queryBuilder.withDeleted();
     }
 
     if (branchId) {
-      // Si hay branchId, usamos INNER JOIN para traer SOLO productos que existan en esa sucursal
-      queryBuilder
-        .innerJoin(
-          'inventories',
-          'inventory',
-          'inventory.product_id = product.id AND inventory.branch_id = :branchId',
-          { branchId },
-        )
-        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
-        .groupBy('product.id')
-        .addGroupBy('category.id')
-        .addGroupBy('unit.id')
-        .addGroupBy('defaultUnit.id');
+      queryBuilder.innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
     } else {
-      // Caso global: LEFT JOIN para ver todos los productos, tengan o no inventario
-      queryBuilder
-        .leftJoin(
-          'inventories',
-          'inventory',
-          'inventory.product_id = product.id',
-        )
-        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
-        .groupBy('product.id')
-        .addGroupBy('category.id')
-        .addGroupBy('unit.id')
-        .addGroupBy('defaultUnit.id');
+      queryBuilder.leftJoin('inventories', 'inventory', 'inventory.product_id = product.id').addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
     }
 
     queryBuilder.orderBy('product.name', 'ASC');
 
-    // Usamos getRawAndEntities para obtener tanto la data de la entidad como el campo calculado 'stock'
     const { entities, raw } = await queryBuilder.getRawAndEntities();
 
     return entities.map((entity, index) => {
-      // Mapeamos el stock calculado al DTO
       const rawItem = raw.find((r) => r.product_id === entity.id);
       const stock = rawItem ? Number(rawItem.stock) : 0;
       return plainToInstance(ProductResponseDto, { ...entity, stock });
     });
   }
 
-  async getTopSelling(
-    branchId?: string,
-    limit: number = 10,
-  ): Promise<ProductResponseDto[]> {
-    // 1. Obtener los IDs de productos más vendidos desde SaleDetails
+  async getTopSelling(branchId?: string, limit: number = 10): Promise<ProductResponseDto[]> {
     const salesQuery = this.productRepository.manager
       .createQueryBuilder('sale_details', 'sd')
       .select('sd.product_id', 'productId')
@@ -514,7 +402,6 @@ export class ProductService {
       salesQuery.andWhere('s.branch_id = :branchId', { branchId });
     }
 
-    // Opcional: Filtrar por fecha (ej. últimos 30 días)
     const lastMonth = new Date();
     lastMonth.setDate(lastMonth.getDate() - 30);
     salesQuery.andWhere('s.date >= :lastMonth', { lastMonth });
@@ -522,42 +409,13 @@ export class ProductService {
     const topSellingRaw = await salesQuery.getRawMany();
     const productIds = topSellingRaw.map((item) => item.productId);
 
-    // 2. Si NO hay ventas, fallback: Obtener productos recientes
     if (!productIds.length) {
-      const fallbackQuery = this.productRepository
-        .createQueryBuilder('product')
-        .leftJoinAndSelect('product.category', 'category')
-        .leftJoinAndSelect('product.unit', 'unit')
-        .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
-        .where('product.deletedAt IS NULL')
-        .orderBy('product.createdAt', 'DESC')
-        .limit(limit);
+      const fallbackQuery = this.productRepository.createQueryBuilder('product').leftJoinAndSelect('product.category', 'category').leftJoinAndSelect('product.unit', 'unit').leftJoinAndSelect('category.defaultUnit', 'defaultUnit').where('product.deletedAt IS NULL').orderBy('product.createdAt', 'DESC').limit(limit);
 
       if (branchId) {
-        fallbackQuery
-          .innerJoin(
-            'inventories',
-            'inventory',
-            'inventory.product_id = product.id AND inventory.branch_id = :branchId',
-            { branchId },
-          )
-          .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
-          .groupBy('product.id')
-          .addGroupBy('category.id')
-          .addGroupBy('unit.id')
-          .addGroupBy('defaultUnit.id');
+        fallbackQuery.innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
       } else {
-        fallbackQuery
-          .leftJoin(
-            'inventories',
-            'inventory',
-            'inventory.product_id = product.id',
-          )
-          .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
-          .groupBy('product.id')
-          .addGroupBy('category.id')
-          .addGroupBy('unit.id')
-          .addGroupBy('defaultUnit.id');
+        fallbackQuery.leftJoin('inventories', 'inventory', 'inventory.product_id = product.id').addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
       }
 
       const { entities, raw } = await fallbackQuery.getRawAndEntities();
@@ -569,45 +427,16 @@ export class ProductService {
       });
     }
 
-    // 3. Obtener la data completa de esos productos (reutilizando lógica de queryBuilder)
-    const productQuery = this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.category', 'category')
-      .leftJoinAndSelect('product.unit', 'unit')
-      .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
-      .whereInIds(productIds);
+    const productQuery = this.productRepository.createQueryBuilder('product').leftJoinAndSelect('product.category', 'category').leftJoinAndSelect('product.unit', 'unit').leftJoinAndSelect('category.defaultUnit', 'defaultUnit').whereInIds(productIds);
 
     if (branchId) {
-      productQuery
-        .innerJoin(
-          'inventories',
-          'inventory',
-          'inventory.product_id = product.id AND inventory.branch_id = :branchId',
-          { branchId },
-        )
-        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
-        .groupBy('product.id')
-        .addGroupBy('category.id')
-        .addGroupBy('unit.id')
-        .addGroupBy('defaultUnit.id');
+      productQuery.innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
     } else {
-      productQuery
-        .leftJoin(
-          'inventories',
-          'inventory',
-          'inventory.product_id = product.id',
-        )
-        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
-        .groupBy('product.id')
-        .addGroupBy('category.id')
-        .addGroupBy('unit.id')
-        .addGroupBy('defaultUnit.id');
+      productQuery.leftJoin('inventories', 'inventory', 'inventory.product_id = product.id').addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
     }
 
     const { entities, raw } = await productQuery.getRawAndEntities();
 
-    // 4. Ordenar los resultados en el mismo orden que los IDs más vendidos
-    // y asignar el stock correcto
     const result = productIds
       .map((id) => {
         const entity = entities.find((e) => e.id === id);
@@ -623,7 +452,6 @@ export class ProductService {
     return result;
   }
 
-  // NUEVO MÉTODO para actualizar solo la imagen
   async updateImage(id: string, imageFile: any): Promise<ProductResponseDto> {
     const product = await this.productRepository.findOne({
       where: { id, deletedAt: IsNull() },
@@ -634,18 +462,34 @@ export class ProductService {
       throw new NotFoundException(`Producto con ID ${id} no encontrado`);
     }
 
-    // Eliminar imagen anterior si existe
     if (product.imageUrl) {
       await this.fileService.deleteProductImage(product.imageUrl);
     }
 
-    // Guardar nueva imagen
     const imageUrl = await this.fileService.saveProductImage(imageFile);
 
-    // Actualizar solo la imagen
     product.imageUrl = imageUrl;
     const updatedProduct = await this.productRepository.save(product);
 
     return plainToInstance(ProductResponseDto, updatedProduct);
+  }
+
+  async getBranchCatalog(branchId: string): Promise<BranchProductResponseDto[]> {
+    const query = this.productRepository.createQueryBuilder('product').leftJoinAndSelect('product.unit', 'unit').innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).where('product.deletedAt IS NULL').andWhere('product.isActive = :isActive', { isActive: true }).select(['product.id', 'product.name', 'product.sku', 'product.imageUrl', 'product.price', 'unit.name', 'unit.abbreviation']).addSelect('inventory.stock', 'stock').orderBy('product.name', 'ASC');
+
+    const rawProducts = await query.getRawMany();
+
+    return rawProducts.map((p) => {
+      const dto = new BranchProductResponseDto();
+      dto.id = p.product_id;
+      dto.name = p.product_name;
+      dto.sku = p.product_sku;
+      dto.imageUrl = p.product_imageUrl;
+      dto.price = Number(p.product_price);
+      dto.stock = Number(p.stock);
+      dto.unitName = p.unit_name;
+      dto.unitAbbreviation = p.unit_abbreviation;
+      return dto;
+    });
   }
 }

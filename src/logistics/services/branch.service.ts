@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Branch } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -17,7 +13,6 @@ export class BranchService {
   ) {}
 
   async create(dto: CreateBranchDto): Promise<BranchResponseDto> {
-    // Verificar si el nombre de sucursal ya existe (incluyendo eliminadas)
     const existingBranch = await this.branchRepository.findOne({
       where: { name: dto.name },
       withDeleted: true,
@@ -25,9 +20,7 @@ export class BranchService {
 
     if (existingBranch) {
       if (existingBranch.deletedAt) {
-        throw new ConflictException(
-          `La sucursal '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador.`,
-        );
+        throw new ConflictException(`La sucursal '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador.`);
       }
       throw new ConflictException(`La sucursal '${dto.name}' ya existe`);
     }
@@ -45,10 +38,7 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, branches);
   }
 
-  async findOne(
-    id: string,
-    includeDeleted: boolean = false,
-  ): Promise<BranchResponseDto> {
+  async findOne(id: string, includeDeleted: boolean = false): Promise<BranchResponseDto> {
     const branch = await this.branchRepository.findOne({
       where: { id },
       withDeleted: includeDeleted,
@@ -70,7 +60,6 @@ export class BranchService {
       throw new NotFoundException(`Sucursal con ID ${id} no encontrada`);
     }
 
-    // Verificar si el nuevo nombre ya existe (incluyendo eliminadas)
     if (dto.name && dto.name !== branch.name) {
       const existingBranch = await this.branchRepository.findOne({
         where: { name: dto.name },
@@ -79,9 +68,7 @@ export class BranchService {
 
       if (existingBranch) {
         if (existingBranch.deletedAt) {
-          throw new ConflictException(
-            `No se puede usar el nombre '${dto.name}' porque pertenece a una sucursal inactiva. Considere reactivarla o contacte con el administrador.`,
-          );
+          throw new ConflictException(`No se puede usar el nombre '${dto.name}' porque pertenece a una sucursal inactiva. Considere reactivarla o contacte con el administrador.`);
         }
         throw new ConflictException(`La sucursal '${dto.name}' ya existe`);
       }
@@ -95,40 +82,23 @@ export class BranchService {
   async remove(id: string): Promise<{ message: string }> {
     const branch = await this.branchRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: [
-        'inventories',
-        'movements',
-        'outgoingTransfers',
-        'incomingTransfers',
-      ],
+      relations: ['inventories', 'movements', 'outgoingTransfers', 'incomingTransfers'],
     });
 
     if (!branch) {
       throw new NotFoundException(`Sucursal con ID ${id} no encontrada`);
     }
 
-    // Verificar si la sucursal tiene inventarios asociados
     if (branch.inventories && branch.inventories.length > 0) {
-      throw new ConflictException(
-        'No se puede eliminar la sucursal porque tiene inventarios asociados',
-      );
+      throw new ConflictException('No se puede eliminar la sucursal porque tiene inventarios asociados');
     }
 
-    // Verificar si la sucursal tiene movimientos asociados
     if (branch.movements && branch.movements.length > 0) {
-      throw new ConflictException(
-        'No se puede eliminar la sucursal porque tiene movimientos asociados',
-      );
+      throw new ConflictException('No se puede eliminar la sucursal porque tiene movimientos asociados');
     }
 
-    // Verificar si la sucursal tiene transferencias asociadas
-    if (
-      (branch.outgoingTransfers && branch.outgoingTransfers.length > 0) ||
-      (branch.incomingTransfers && branch.incomingTransfers.length > 0)
-    ) {
-      throw new ConflictException(
-        'No se puede eliminar la sucursal porque tiene transferencias asociadas',
-      );
+    if ((branch.outgoingTransfers && branch.outgoingTransfers.length > 0) || (branch.incomingTransfers && branch.incomingTransfers.length > 0)) {
+      throw new ConflictException('No se puede eliminar la sucursal porque tiene transferencias asociadas');
     }
 
     await this.branchRepository.softRemove(branch);
@@ -154,10 +124,7 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, restoredBranch);
   }
 
-  async searchBranches(
-    query: string,
-    includeDeleted: boolean = false,
-  ): Promise<BranchResponseDto[]> {
+  async searchBranches(query: string, includeDeleted: boolean = false): Promise<BranchResponseDto[]> {
     const queryBuilder = this.branchRepository.createQueryBuilder('branch');
 
     if (!includeDeleted) {
@@ -167,10 +134,7 @@ export class BranchService {
     }
 
     const branches = await queryBuilder
-      .andWhere(
-        '(branch.name ILIKE :query OR branch.address ILIKE :query OR branch.email ILIKE :query)',
-        { query: `%${query}%` },
-      )
+      .andWhere('(branch.name ILIKE :query OR branch.address ILIKE :query OR branch.email ILIKE :query)', { query: `%${query}%` })
       .orderBy('branch.name', 'ASC')
       .getMany();
 

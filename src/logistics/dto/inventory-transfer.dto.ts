@@ -1,14 +1,4 @@
-import {
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  ValidateNested,
-  IsNumber,
-  Min,
-  ArrayNotEmpty,
-} from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested, IsNumber, Min, ArrayNotEmpty } from 'class-validator';
 import { Type, Expose } from 'class-transformer';
 import { TransferStatus } from '../entities/inventory-transfer.entity';
 
@@ -57,7 +47,22 @@ export class TransferItemResponseDto {
   productName: string;
 
   @Expose()
+  sku: string;
+
+  @Expose()
   quantity: number;
+
+  @Expose()
+  unitAbbreviation?: string;
+
+  @Expose()
+  price: number;
+
+  @Expose()
+  subtotal: number;
+
+  @Expose()
+  imageUrl?: string;
 }
 
 export class InventoryTransferResponseDto {
@@ -88,6 +93,35 @@ export class InventoryTransferResponseDto {
   @Expose()
   @Type(() => TransferItemResponseDto)
   items: TransferItemResponseDto[];
+
+  @Expose()
+  totalValue: number;
+
+  @Expose()
+  createdBy: string;
+
+  @Expose()
+  createdAt: Date;
+
+  @Expose()
+  updatedAt: Date;
+}
+
+export class InventoryTransferListResponseDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  transferNumber: string;
+
+  @Expose()
+  status: TransferStatus;
+
+  @Expose()
+  originBranchName: string;
+
+  @Expose()
+  destinationBranchName: string;
 
   @Expose()
   createdBy: string;

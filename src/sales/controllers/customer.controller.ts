@@ -1,27 +1,8 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Put,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { CustomerService } from '../services/customer.service';
-import {
-  CreateCustomerDto,
-  CustomerResponseDto,
-  UpdateCustomerDto,
-} from '../dto';
+import { CreateCustomerDto, CustomerResponseDto, UpdateCustomerDto } from '../dto';
 import { Permissions, Public } from 'src/auth/decorators';
-import { isSuperAdmin } from 'src/utils/user-scope.util';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from 'src/auth/guards/permissions.guard';
 
@@ -39,30 +20,21 @@ export class CustomerController {
 
   @Get()
   @Permissions('customers.view')
-  findAll(
-    @Req() req,
-    @Query('includeDeleted') includeDeleted: string,
-  ): Promise<CustomerResponseDto[]> {
+  findAll(@Req() req, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
     return this.customerService.findAll(showDeleted);
   }
 
   @Get('search')
   @Permissions('customers.view')
-  search(
-    @Req() req,
-    @Query('q') query: string,
-    @Query('includeDeleted') includeDeleted: string,
-  ): Promise<CustomerResponseDto[]> {
+  search(@Req() req, @Query('q') query: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
     return this.customerService.searchCustomers(query, showDeleted);
   }
 
   @Get('top')
   @Public()
-  getTopCustomers(
-    @Query('limit') limit: number = 10,
-  ): Promise<CustomerResponseDto[]> {
+  getTopCustomers(@Query('limit') limit: number = 10): Promise<CustomerResponseDto[]> {
     return this.customerService.getTopCustomers(limit);
   }
 
@@ -80,63 +52,42 @@ export class CustomerController {
 
   @Get('category/:categoryId')
   @Permissions('customers.view')
-  findByCategory(
-    @Req() req,
-    @Param('categoryId', ParseUUIDPipe) categoryId: string,
-    @Query('includeDeleted') includeDeleted: string,
-  ): Promise<CustomerResponseDto[]> {
+  findByCategory(@Req() req, @Param('categoryId', ParseUUIDPipe) categoryId: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
     return this.customerService.findByCategory(categoryId, showDeleted);
   }
 
   @Get('nit/:nit')
   @Permissions('customers.view')
-  findByNit(
-    @Req() req,
-    @Param('nit') nit: string,
-    @Query('includeDeleted') includeDeleted: string,
-  ): Promise<CustomerResponseDto> {
+  findByNit(@Req() req, @Param('nit') nit: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
     return this.customerService.findByNit(nit, showDeleted);
   }
 
   @Get(':id')
   @Permissions('customers.view')
-  findOne(
-    @Req() req,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query('includeDeleted') includeDeleted: string,
-  ): Promise<CustomerResponseDto> {
+  findOne(@Req() req, @Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
     return this.customerService.findOne(id, showDeleted);
   }
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateCustomerDto,
-  ): Promise<CustomerResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCustomerDto): Promise<CustomerResponseDto> {
     return this.customerService.update(id, dto);
   }
 
   @Post(':id/add-points/:points')
   @Public()
   @HttpCode(HttpStatus.OK)
-  addLoyaltyPoints(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('points') points: number,
-  ): Promise<CustomerResponseDto> {
+  addLoyaltyPoints(@Param('id', ParseUUIDPipe) id: string, @Param('points') points: number): Promise<CustomerResponseDto> {
     return this.customerService.addLoyaltyPoints(id, points);
   }
 
   @Post(':id/redeem-points/:points')
   @Public()
   @HttpCode(HttpStatus.OK)
-  redeemLoyaltyPoints(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('points') points: number,
-  ): Promise<CustomerResponseDto> {
+  redeemLoyaltyPoints(@Param('id', ParseUUIDPipe) id: string, @Param('points') points: number): Promise<CustomerResponseDto> {
     return this.customerService.redeemLoyaltyPoints(id, points);
   }
 
@@ -149,9 +100,7 @@ export class CustomerController {
 
   @Patch(':id/restore')
   @Permissions('customers.manage')
-  restore(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<CustomerResponseDto> {
+  restore(@Param('id', ParseUUIDPipe) id: string): Promise<CustomerResponseDto> {
     return this.customerService.restore(id);
   }
 }

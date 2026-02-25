@@ -1,12 +1,5 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  MaxLength,
-  Matches,
-  IsEmail,
-} from 'class-validator';
-import { Exclude, Expose } from 'class-transformer';
+import { IsString, IsOptional, IsNotEmpty, MaxLength, Matches, IsEmail } from 'class-validator';
+import { Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 
 export class CreateSupplierDto {

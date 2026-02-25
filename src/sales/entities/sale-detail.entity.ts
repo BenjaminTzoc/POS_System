@@ -1,7 +1,13 @@
 import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { Sale } from '.';
-import { Product } from 'src/logistics/entities';
+import { Sale, DiscountType } from '.';
+import { Area, Product } from 'src/logistics/entities';
+
+export enum PreparationStatus {
+  PENDING = 'pending',
+  IN_PROGRESS = 'in_progress',
+  COMPLETED = 'completed',
+}
 
 @Entity('sale_details')
 export class SaleDetail extends BaseEntity {
@@ -12,6 +18,17 @@ export class SaleDetail extends BaseEntity {
   @ManyToOne(() => Product, { eager: true, nullable: false })
   @JoinColumn({ name: 'product_id' })
   product: Product;
+
+  @ManyToOne(() => Area, { nullable: true, eager: true })
+  @JoinColumn({ name: 'current_area_id' })
+  currentArea?: Area;
+
+  @Column({
+    type: 'enum',
+    enum: PreparationStatus,
+    default: PreparationStatus.PENDING,
+  })
+  preparationStatus: PreparationStatus;
 
   @Column({ type: 'decimal', precision: 10, scale: 3 })
   quantity: number;
@@ -25,6 +42,14 @@ export class SaleDetail extends BaseEntity {
   @Column({ name: 'discount_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
   discountAmount: number;
 
+  @Column({
+    name: 'discount_type',
+    type: 'enum',
+    enum: DiscountType,
+    default: DiscountType.PERCENTAGE,
+  })
+  discountType: DiscountType;
+
   @Column({ name: 'tax_percentage', type: 'decimal', precision: 5, scale: 2, default: 0 })
   taxPercentage: number;
 
@@ -33,4 +58,10 @@ export class SaleDetail extends BaseEntity {
 
   @Column({ name: 'line_total', type: 'decimal', precision: 12, scale: 2 })
   lineTotal: number;
+
+  @Column({ name: 'original_price', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  originalPrice?: number;
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
 }

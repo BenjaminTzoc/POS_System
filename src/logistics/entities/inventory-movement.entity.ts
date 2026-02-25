@@ -72,7 +72,7 @@ export class InventoryMovement extends BaseEntity {
   status: MovementStatus;
 
   @Column({ name: 'reference_id', type: 'uuid', nullable: true })
-  referenceId?: string; // Para relacionar movimientos (ej: transfer_out con transfer_in)
+  referenceId?: string;
 
   @Column({
     name: 'reference_number',
@@ -80,7 +80,7 @@ export class InventoryMovement extends BaseEntity {
     length: 50,
     nullable: true,
   })
-  referenceNumber?: string; // Ej: F-001, ORD-2025-001
+  referenceNumber?: string;
 
   @Column({
     type: 'enum',
@@ -144,7 +144,7 @@ export class InventoryMovement extends BaseEntity {
     nullable: true,
     transformer: columnNumericTransformer,
   })
-  unitCost?: number; // Costo unitario al momento del movimiento
+  unitCost?: number;
 
   @Column({
     name: 'total_cost',
@@ -154,5 +154,5 @@ export class InventoryMovement extends BaseEntity {
     nullable: true,
     transformer: columnNumericTransformer,
   })
-  totalCost?: number; // Costo total (quantity * unitCost)
+  totalCost?: number;
 }

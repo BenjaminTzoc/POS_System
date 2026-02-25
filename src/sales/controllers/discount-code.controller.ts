@@ -5,9 +5,7 @@ import { Public } from 'src/auth/decorators';
 
 @Controller('discount-codes')
 export class DiscountCodeController {
-  constructor(
-    private readonly discountCodeService: DiscountCodeService,
-  ) {}
+  constructor(private readonly discountCodeService: DiscountCodeService) {}
 
   @Post()
   @Public()
@@ -44,18 +42,8 @@ export class DiscountCodeController {
 
   @Get('validate/:code')
   @Public()
-  validateCode(
-    @Param('code') code: string,
-    @Query('customerId') customerId?: string,
-    @Query('productId') productId?: string,
-    @Query('purchaseAmount') purchaseAmount: number = 0,
-  ): Promise<{ isValid: boolean; discountAmount: number; message?: string }> {
-    return this.discountCodeService.validateDiscountCode(
-      code, 
-      customerId, 
-      productId, 
-      Number(purchaseAmount)
-    );
+  validateCode(@Param('code') code: string, @Query('customerId') customerId?: string, @Query('productId') productId?: string, @Query('purchaseAmount') purchaseAmount: number = 0): Promise<{ isValid: boolean; discountAmount: number; message?: string }> {
+    return this.discountCodeService.validateDiscountCode(code, customerId, productId, Number(purchaseAmount));
   }
 
   @Get('code/:code')
@@ -72,20 +60,14 @@ export class DiscountCodeController {
 
   @Put(':id')
   @Public()
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateDiscountCodeDto,
-  ): Promise<DiscountCodeResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateDiscountCodeDto): Promise<DiscountCodeResponseDto> {
     return this.discountCodeService.update(id, dto);
   }
 
   @Post('apply/:code')
   @Public()
   @HttpCode(HttpStatus.OK)
-  applyDiscountCode(
-    @Param('code') code: string,
-    @Body('saleId', ParseUUIDPipe) saleId: string,
-  ): Promise<DiscountCodeResponseDto> {
+  applyDiscountCode(@Param('code') code: string, @Body('saleId', ParseUUIDPipe) saleId: string): Promise<DiscountCodeResponseDto> {
     return this.discountCodeService.applyDiscountCode(code, saleId);
   }
 

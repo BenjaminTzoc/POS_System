@@ -4,16 +4,11 @@ import { CreateSaleDetailDto, SaleDetailResponseDto, UpdateSaleDetailDto } from 
 
 @Controller('sale-details')
 export class SaleDetailController {
-  constructor(
-    private readonly saleDetailService: SaleDetailService,
-  ) {}
+  constructor(private readonly saleDetailService: SaleDetailService) {}
 
   @Post('sale/:saleId')
   @HttpCode(HttpStatus.CREATED)
-  create(
-    @Param('saleId', ParseUUIDPipe) saleId: string,
-    @Body() dto: CreateSaleDetailDto,
-  ): Promise<SaleDetailResponseDto> {
+  create(@Param('saleId', ParseUUIDPipe) saleId: string, @Body() dto: CreateSaleDetailDto): Promise<SaleDetailResponseDto> {
     return this.saleDetailService.create(dto, saleId);
   }
 
@@ -55,19 +50,13 @@ export class SaleDetailController {
   }
 
   @Put(':id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateSaleDetailDto,
-  ): Promise<SaleDetailResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSaleDetailDto): Promise<SaleDetailResponseDto> {
     return this.saleDetailService.update(id, dto);
   }
 
   @Put(':id/quantity/:quantity')
   @HttpCode(HttpStatus.OK)
-  updateQuantity(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('quantity') quantity: number,
-  ): Promise<SaleDetailResponseDto> {
+  updateQuantity(@Param('id', ParseUUIDPipe) id: string, @Param('quantity') quantity: number): Promise<SaleDetailResponseDto> {
     return this.saleDetailService.updateDetailQuantity(id, quantity);
   }
 

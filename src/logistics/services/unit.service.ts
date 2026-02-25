@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Unit } from '../entities';
 import { IsNull, Repository } from 'typeorm';
@@ -17,7 +13,6 @@ export class UnitService {
   ) {}
 
   async create(dto: CreateUnitDto): Promise<UnitResponseDto> {
-    // Verificar si la unidad ya existe (incluyendo eliminadas)
     const existingUnit = await this.unitRepository.findOne({
       where: { name: dto.name },
       withDeleted: true,
@@ -25,14 +20,11 @@ export class UnitService {
 
     if (existingUnit) {
       if (existingUnit.deletedAt) {
-        throw new ConflictException(
-          `La unidad '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`,
-        );
+        throw new ConflictException(`La unidad '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`);
       }
       throw new ConflictException(`La unidad '${dto.name}' ya existe`);
     }
 
-    // Verificar si la abreviatura ya existe (incluyendo eliminadas)
     const existingAbbreviation = await this.unitRepository.findOne({
       where: { abbreviation: dto.abbreviation },
       withDeleted: true,
@@ -40,13 +32,9 @@ export class UnitService {
 
     if (existingAbbreviation) {
       if (existingAbbreviation.deletedAt) {
-        throw new ConflictException(
-          `La abreviatura '${dto.abbreviation}' ya existe en una unidad inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`,
-        );
+        throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya existe en una unidad inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`);
       }
-      throw new ConflictException(
-        `La abreviatura '${dto.abbreviation}' ya está en uso`,
-      );
+      throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya está en uso`);
     }
 
     const unit = this.unitRepository.create(dto);
@@ -62,10 +50,7 @@ export class UnitService {
     return plainToInstance(UnitResponseDto, units);
   }
 
-  async findOne(
-    id: string,
-    includeDeleted: boolean = false,
-  ): Promise<UnitResponseDto> {
+  async findOne(id: string, includeDeleted: boolean = false): Promise<UnitResponseDto> {
     const unit = await this.unitRepository.findOne({
       where: { id },
       withDeleted: includeDeleted,
@@ -87,7 +72,6 @@ export class UnitService {
       throw new NotFoundException(`Unidad con ID ${id} no encontrada`);
     }
 
-    // Verificar si el nuevo nombre ya existe (incluyendo eliminadas)
     if (dto.name && dto.name !== unit.name) {
       const existingUnit = await this.unitRepository.findOne({
         where: { name: dto.name },
@@ -96,15 +80,12 @@ export class UnitService {
 
       if (existingUnit) {
         if (existingUnit.deletedAt) {
-          throw new ConflictException(
-            `No se puede usar el nombre '${dto.name}' porque pertenece a una unidad inactiva. Considere reactivarla o contacte con el administrador.`,
-          );
+          throw new ConflictException(`No se puede usar el nombre '${dto.name}' porque pertenece a una unidad inactiva. Considere reactivarla o contacte con el administrador.`);
         }
         throw new ConflictException(`La unidad '${dto.name}' ya existe`);
       }
     }
 
-    // Verificar si la nueva abreviatura ya existe (incluyendo eliminadas)
     if (dto.abbreviation && dto.abbreviation !== unit.abbreviation) {
       const existingAbbreviation = await this.unitRepository.findOne({
         where: { abbreviation: dto.abbreviation },
@@ -113,13 +94,9 @@ export class UnitService {
 
       if (existingAbbreviation) {
         if (existingAbbreviation.deletedAt) {
-          throw new ConflictException(
-            `La abreviatura '${dto.abbreviation}' ya pertenece a una unidad inactiva.`,
-          );
+          throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya pertenece a una unidad inactiva.`);
         }
-        throw new ConflictException(
-          `La abreviatura '${dto.abbreviation}' ya está en uso`,
-        );
+        throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya está en uso`);
       }
     }
 
@@ -137,32 +114,16 @@ export class UnitService {
       throw new NotFoundException(`Unidad con ID ${id} no encontrada`);
     }
 
-    // Verificar si la unidad está siendo usada en categorías
-    const categoriesCount = await this.unitRepository
-      .createQueryBuilder('unit')
-      .innerJoin('unit.categories', 'category')
-      .where('unit.id = :id', { id })
-      .andWhere('category.deletedAt IS NULL')
-      .getCount();
+    const categoriesCount = await this.unitRepository.createQueryBuilder('unit').innerJoin('unit.categories', 'category').where('unit.id = :id', { id }).andWhere('category.deletedAt IS NULL').getCount();
 
     if (categoriesCount > 0) {
-      throw new ConflictException(
-        'No se puede eliminar la unidad porque está siendo usada en categorías',
-      );
+      throw new ConflictException('No se puede eliminar la unidad porque está siendo usada en categorías');
     }
 
-    // Verificar si la unidad está siendo usada en productos
-    const productsCount = await this.unitRepository
-      .createQueryBuilder('unit')
-      .innerJoin('unit.products', 'product')
-      .where('unit.id = :id', { id })
-      .andWhere('product.deletedAt IS NULL')
-      .getCount();
+    const productsCount = await this.unitRepository.createQueryBuilder('unit').innerJoin('unit.products', 'product').where('unit.id = :id', { id }).andWhere('product.deletedAt IS NULL').getCount();
 
     if (productsCount > 0) {
-      throw new ConflictException(
-        'No se puede eliminar la unidad porque está siendo usada en productos',
-      );
+      throw new ConflictException('No se puede eliminar la unidad porque está siendo usada en productos');
     }
 
     await this.unitRepository.softRemove(unit);

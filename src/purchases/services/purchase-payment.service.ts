@@ -20,7 +20,6 @@ export class PurchasePaymentService {
 
   async create(dto: CreatePurchasePaymentDto): Promise<PurchasePaymentResponseDto> {
     console.log(dto.amount);
-    // Validar que la compra existe
     let purchase;
     try {
       purchase = await this.purchaseService.findOne(dto.purchaseId);
@@ -28,7 +27,6 @@ export class PurchasePaymentService {
       throw new BadRequestException(`La compra con ID ${dto.purchaseId} no existe`);
     }
 
-    // Validar que el método de pago existe
     let paymentMethod;
     try {
       paymentMethod = await this.paymentMethodService.findOne(dto.paymentMethodId);
@@ -36,22 +34,18 @@ export class PurchasePaymentService {
       throw new BadRequestException(`El método de pago con ID ${dto.paymentMethodId} no existe`);
     }
 
-    // Validar que el método de pago esté activo
     if (!paymentMethod.isActive) {
       throw new BadRequestException('El método de pago no está activo');
     }
 
-    // Validar que se requiere cuenta bancaria si el método lo requiere
     if (paymentMethod.requiresBankAccount && !dto.bankAccount) {
       throw new BadRequestException('Este método de pago requiere una cuenta bancaria');
     }
 
-    // Validar que el monto no exceda el pendiente
     if (dto.amount > purchase.pendingAmount) {
       throw new BadRequestException(`El monto excede el saldo pendiente de Q${purchase.pendingAmount}`);
     }
 
-    // Validar que la compra no esté cancelada
     if (purchase.status === PurchaseStatus.CANCELLED) {
       throw new BadRequestException('No se pueden agregar pagos a una compra cancelada');
     }
@@ -61,7 +55,6 @@ export class PurchasePaymentService {
     await queryRunner.startTransaction();
 
     try {
-      // Crear el pago
       const payment = queryRunner.manager.create(PurchasePayment, {
         purchase: { id: dto.purchaseId },
         paymentMethod: { id: dto.paymentMethodId },
@@ -75,10 +68,9 @@ export class PurchasePaymentService {
 
       const savedPayment = await queryRunner.manager.save(payment);
 
-      // Actualizar los montos de la compra
       const newPaidAmount = Number(purchase.paidAmount) + Number(dto.amount);
       const newPendingAmount = Number(purchase.total) - newPaidAmount;
-      
+
       const newStatus = this.calculatePurchaseStatus(Number(purchase.total), newPaidAmount);
 
       await queryRunner.manager.update(Purchase, purchase.id, {
@@ -121,9 +113,9 @@ export class PurchasePaymentService {
 
   async findByPurchase(purchaseId: string): Promise<PurchasePaymentResponseDto[]> {
     const payments = await this.paymentRepository.find({
-      where: { 
+      where: {
         purchase: { id: purchaseId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['purchase', 'paymentMethod'],
       order: { date: 'ASC' },
@@ -133,9 +125,9 @@ export class PurchasePaymentService {
 
   async findByPaymentMethod(paymentMethodId: string): Promise<PurchasePaymentResponseDto[]> {
     const payments = await this.paymentRepository.find({
-      where: { 
+      where: {
         paymentMethod: { id: paymentMethodId },
-        deletedAt: IsNull() 
+        deletedAt: IsNull(),
       },
       relations: ['purchase', 'purchase.supplier', 'paymentMethod'],
       order: { date: 'DESC' },
@@ -170,7 +162,6 @@ export class PurchasePaymentService {
       throw new NotFoundException(`Pago con ID ${id} no encontrado`);
     }
 
-    // Validar que no se pueda modificar un pago cancelado
     if (payment.status === PaymentStatus.CANCELLED) {
       throw new BadRequestException('No se puede modificar un pago cancelado');
     }
@@ -183,20 +174,17 @@ export class PurchasePaymentService {
     await queryRunner.startTransaction();
 
     try {
-      // Revertir el monto anterior
       const temporaryPaidAmount = purchase.paidAmount - oldAmount;
       const temporaryPendingAmount = purchase.total - temporaryPaidAmount;
 
-      // Aplicar el nuevo monto
       const newAmount = dto.amount ?? payment.amount;
       const newPaidAmount = temporaryPaidAmount + newAmount;
       const newPendingAmount = purchase.total - newPaidAmount;
 
-      if (newAmount > (temporaryPendingAmount + oldAmount)) {
+      if (newAmount > temporaryPendingAmount + oldAmount) {
         throw new BadRequestException(`El nuevo monto excede el saldo pendiente disponible`);
       }
 
-      // Actualizar el pago
       Object.assign(payment, {
         amount: newAmount,
         date: dto.date ? new Date(dto.date) : payment.date,
@@ -208,7 +196,6 @@ export class PurchasePaymentService {
 
       const updatedPayment = await queryRunner.manager.save(payment);
 
-      // Actualizar la compra
       const newStatus = this.calculatePurchaseStatus(purchase.total, newPaidAmount);
 
       await queryRunner.manager.update(Purchase, purchase.id, {
@@ -248,11 +235,9 @@ export class PurchasePaymentService {
     await queryRunner.startTransaction();
 
     try {
-      // Cancelar el pago
       payment.status = PaymentStatus.CANCELLED;
       await queryRunner.manager.save(payment);
 
-      // Recalcular los montos de la compra
       const newPaidAmount = purchase.paidAmount - payment.amount;
       const newPendingAmount = purchase.total - newPaidAmount;
       const newStatus = this.calculatePurchaseStatus(purchase.total, newPaidAmount);
@@ -282,7 +267,6 @@ export class PurchasePaymentService {
       throw new NotFoundException(`Pago con ID ${id} no encontrado`);
     }
 
-    // No permitir eliminación física, solo cancelación
     throw new BadRequestException('Use el endpoint de cancelación en lugar de eliminar el pago');
   }
 
@@ -306,9 +290,9 @@ export class PurchasePaymentService {
       byPaymentMethod: {},
     };
 
-    payments.forEach(payment => {
+    payments.forEach((payment) => {
       stats.totalAmount += payment.amount;
-      
+
       if (payment.status === PaymentStatus.COMPLETED) {
         stats.completedPayments++;
       } else if (payment.status === PaymentStatus.CANCELLED) {
@@ -323,16 +307,7 @@ export class PurchasePaymentService {
   }
 
   async getSupplierPayments(supplierId: string): Promise<PurchasePaymentResponseDto[]> {
-    const payments = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.purchase', 'purchase')
-      .leftJoinAndSelect('purchase.supplier', 'supplier')
-      .leftJoinAndSelect('payment.paymentMethod', 'paymentMethod')
-      .where('supplier.id = :supplierId', { supplierId })
-      .andWhere('payment.deletedAt IS NULL')
-      .andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED })
-      .orderBy('payment.date', 'DESC')
-      .getMany();
+    const payments = await this.paymentRepository.createQueryBuilder('payment').leftJoinAndSelect('payment.purchase', 'purchase').leftJoinAndSelect('purchase.supplier', 'supplier').leftJoinAndSelect('payment.paymentMethod', 'paymentMethod').where('supplier.id = :supplierId', { supplierId }).andWhere('payment.deletedAt IS NULL').andWhere('payment.status = :status', { status: PaymentStatus.COMPLETED }).orderBy('payment.date', 'DESC').getMany();
 
     return plainToInstance(PurchasePaymentResponseDto, payments);
   }

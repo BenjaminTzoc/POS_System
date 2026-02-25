@@ -1,21 +1,7 @@
-import {
-  IsString,
-  IsOptional,
-  IsNotEmpty,
-  IsUUID,
-  IsNumber,
-  MaxLength,
-  Min,
-  isString,
-  IsEnum,
-  IsBoolean,
-  ValidateNested,
-  ArrayMinSize,
-} from 'class-validator';
-import { Type, Exclude, Expose, Transform } from 'class-transformer';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min, IsEnum, IsBoolean, ValidateNested } from 'class-validator';
+import { Type, Expose, Transform } from 'class-transformer';
 import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { CategoryResponseDto } from './category.dto';
 import { UnitResponseDto } from './unit.dto';
 import { StockAvailability } from '../entities/product.entity';
 
@@ -30,7 +16,6 @@ class InitialStockDto {
   quantity: number;
 }
 
-// Helper para transformar strings 'true'/'false' a booleanos
 const TransformBoolean = () =>
   Transform(({ value, key }) => {
     console.log(`DEBUG TRANSFORM [${key}]:`, { value, type: typeof value });
@@ -102,13 +87,7 @@ export class CreateProductDto {
   isVisible?: boolean | string;
 }
 
-// UpdateProductDto hereda todas las propiedades de CreateProductDto como opcionales,
-// excepto 'initialStocks' que se omite.
-// NOTA: Redefinimos los booleanos explícitamente porque PartialType a veces
-// no hereda correctamente los decoradores @Transform de class-transformer.
-export class UpdateProductDto extends PartialType(
-  OmitType(CreateProductDto, ['initialStocks'] as const),
-) {
+export class UpdateProductDto extends PartialType(OmitType(CreateProductDto, ['initialStocks'] as const)) {
   @IsOptional()
   @IsBoolean()
   @TransformBoolean()
@@ -123,6 +102,32 @@ export class UpdateProductDto extends PartialType(
   @IsBoolean()
   @TransformBoolean()
   isVisible?: boolean | string;
+}
+
+export class BranchProductResponseDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  name: string;
+
+  @Expose()
+  imageUrl: string | null;
+
+  @Expose()
+  sku: string;
+
+  @Expose()
+  stock: number;
+
+  @Expose()
+  unitAbbreviation: string | null;
+
+  @Expose()
+  unitName: string | null;
+
+  @Expose()
+  price: number;
 }
 
 export class ProductResponseDto extends BaseEntity {
@@ -169,12 +174,11 @@ export class ProductResponseDto extends BaseEntity {
   stock: number | null;
 
   @Expose()
-  @Type(() => CategoryResponseDto)
-  category: CategoryResponseDto | null;
-
-  @Expose()
   @Type(() => UnitResponseDto)
   unit: UnitResponseDto | null;
+
+  @Expose()
+  area: any | null;
 
   @Expose()
   declare createdAt: Date;

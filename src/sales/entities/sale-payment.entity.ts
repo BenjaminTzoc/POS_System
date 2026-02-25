@@ -2,6 +2,7 @@ import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Sale } from '.';
 import { PaymentMethod } from 'src/purchases/entities';
+import { BankAccount } from 'src/finances/entities/bank-account.entity';
 
 export enum PaymentStatus {
   PENDING = 'pending',
@@ -37,8 +38,12 @@ export class SalePayment extends BaseEntity {
   @Column({ name: 'reference_number', type: 'text', nullable: true })
   referenceNumber: string | null;
 
-  @Column({ name: 'bank_account', type: 'text', nullable: true })
-  bankAccount: string | null;
+  @ManyToOne(() => BankAccount, { nullable: true, eager: true })
+  @JoinColumn({ name: 'bank_account_id' })
+  bankAccount: BankAccount | null;
+
+  @Column({ name: 'manual_bank_account', type: 'text', nullable: true })
+  manualBankAccount: string | null;
 
   @Column({
     type: 'enum',
@@ -46,6 +51,9 @@ export class SalePayment extends BaseEntity {
     default: PaymentStatus.COMPLETED,
   })
   status: PaymentStatus;
+
+  @Column({ name: 'is_down_payment', type: 'boolean', default: false })
+  isDownPayment: boolean;
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;

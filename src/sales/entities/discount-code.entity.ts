@@ -1,17 +1,17 @@
-import { Entity, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { Entity, Column, OneToMany } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Sale } from '.';
 
 export enum DiscountType {
   PERCENTAGE = 'percentage',
-  FIXED_AMOUNT = 'fixed_amount'
+  FIXED_AMOUNT = 'fixed_amount',
 }
 
 export enum DiscountScope {
   GLOBAL = 'global',
   CATEGORY = 'category',
   PRODUCT = 'product',
-  CUSTOMER = 'customer'
+  CUSTOMER = 'customer',
 }
 
 @Entity('discount_codes')

@@ -1,8 +1,6 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsNotEmpty, IsUUID, IsNumber, Min } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { ProductResponseDto } from './product.dto';
-import { BranchResponseDto } from './branch.dto';
 import { UnitResponseDto } from '.';
 
 export class CreateInventoryDto {

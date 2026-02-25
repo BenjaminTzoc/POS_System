@@ -1,22 +1,6 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Post,
-  Put,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { SalePaymentService } from '../services';
-import {
-  CreateSalePaymentDto,
-  SalePaymentResponseDto,
-  UpdateSalePaymentDto,
-} from '../dto';
+import { CreateSalePaymentDto, SalePaymentResponseDto, UpdateSalePaymentDto } from '../dto';
 import { Public } from 'src/auth/decorators';
 
 @Controller('sale-payment')
@@ -39,7 +23,8 @@ export class SalePaymentController {
       paymentMethodId: string;
       amount: number;
       referenceNumber?: string;
-      bankAccount?: string;
+      bankAccountId?: string;
+      manualBankAccount?: string;
     }>,
   ): Promise<SalePaymentResponseDto[]> {
     return this.salePaymentService.createPartialPayment(saleId, payments);
@@ -51,31 +36,22 @@ export class SalePaymentController {
   }
 
   @Get('sale/:saleId')
-  findBySale(
-    @Param('saleId', ParseUUIDPipe) saleId: string,
-  ): Promise<SalePaymentResponseDto[]> {
+  findBySale(@Param('saleId', ParseUUIDPipe) saleId: string): Promise<SalePaymentResponseDto[]> {
     return this.salePaymentService.findBySale(saleId);
   }
 
   @Get('payment-method/:paymentMethodId')
-  findByPaymentMethod(
-    @Param('paymentMethodId', ParseUUIDPipe) paymentMethodId: string,
-  ): Promise<SalePaymentResponseDto[]> {
+  findByPaymentMethod(@Param('paymentMethodId', ParseUUIDPipe) paymentMethodId: string): Promise<SalePaymentResponseDto[]> {
     return this.salePaymentService.findByPaymentMethod(paymentMethodId);
   }
 
   @Get('customer/:customerId')
-  getCustomerPayments(
-    @Param('customerId', ParseUUIDPipe) customerId: string,
-  ): Promise<SalePaymentResponseDto[]> {
+  getCustomerPayments(@Param('customerId', ParseUUIDPipe) customerId: string): Promise<SalePaymentResponseDto[]> {
     return this.salePaymentService.getCustomerPayments(customerId);
   }
 
   @Get('date-range')
-  findByDateRange(
-    @Query('startDate') startDate: string,
-    @Query('endDate') endDate: string,
-  ): Promise<SalePaymentResponseDto[]> {
+  findByDateRange(@Query('startDate') startDate: string, @Query('endDate') endDate: string): Promise<SalePaymentResponseDto[]> {
     return this.salePaymentService.findByDateRange(startDate, endDate);
   }
 
@@ -101,26 +77,19 @@ export class SalePaymentController {
   }
 
   @Get(':id')
-  findOne(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<SalePaymentResponseDto> {
+  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SalePaymentResponseDto> {
     return this.salePaymentService.findOne(id);
   }
 
   @Put(':id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateSalePaymentDto,
-  ): Promise<SalePaymentResponseDto> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSalePaymentDto): Promise<SalePaymentResponseDto> {
     return this.salePaymentService.update(id, dto);
   }
 
   @Post(':id/cancel')
   @Public()
   @HttpCode(HttpStatus.OK)
-  cancel(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<SalePaymentResponseDto> {
+  cancel(@Param('id', ParseUUIDPipe) id: string): Promise<SalePaymentResponseDto> {
     return this.salePaymentService.cancel(id);
   }
 

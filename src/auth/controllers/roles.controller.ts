@@ -7,9 +7,7 @@ import { PermissionsGuard } from '../guards/permissions.guard';
 
 @Controller('roles')
 export class RolesController {
-  constructor(
-    private readonly authService: AuthService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Post()
   @Public()
@@ -34,10 +32,7 @@ export class RolesController {
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  updateRole(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateRoleDto,
-  ): Promise<RoleResponseDto> {
+  updateRole(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRoleDto): Promise<RoleResponseDto> {
     return this.authService.updateRole(id, dto);
   }
 
