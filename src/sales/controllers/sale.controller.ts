@@ -59,9 +59,11 @@ export class SaleController {
   @Get('table')
   @Permissions('orders.view')
   async getTableData(@Query() filterDto: SaleFilterDto) {
-    const filters = { ...filterDto };
-    delete filters.groupBy;
-    return this.saleService.findAll(filters);
+    if (filterDto.groupBy === 'status') {
+      const { groupBy, ...rest } = filterDto;
+      return this.saleService.findAll(rest);
+    }
+    return this.saleService.findAll(filterDto);
   }
 
   @Get('kanban')

@@ -8,7 +8,7 @@ import { UnitService } from './unit.service';
 import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { FilesService } from './files.service';
-import { StockAvailability } from '../entities/product.entity';
+import { StockAvailability, ProductType } from '../entities/product.entity';
 
 @Injectable()
 export class ProductService {
@@ -25,17 +25,80 @@ export class ProductService {
     private readonly fileService: FilesService
   ) {}
 
-  async createWithInventory(dto: CreateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
-    const existingSku = await this.productRepository.findOne({
-      where: { sku: dto.sku },
-      withDeleted: true,
-    });
+  async suggestSku(name?: string, categoryId?: string, type?: ProductType): Promise<{ sku: string }> {
+    let prefix = 'PROD';
 
-    if (existingSku) {
-      if (existingSku.deletedAt) {
-        throw new ConflictException(`El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}). Restaure el producto o use otro SKU.`);
+    if (name && name.trim().length >= 2) {
+      // 1. Limpiar el nombre: quitar acentos, caracteres especiales y dejar solo letras
+      const cleanName = name
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+        .replace(/[^a-zA-Z]/g, '') // Solo letras
+        .toUpperCase();
+
+      if (cleanName.length >= 3) {
+        prefix = cleanName.substring(0, 3);
+      } else {
+        prefix = cleanName.padEnd(3, 'X');
       }
-      throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
+    } else if (categoryId) {
+      try {
+        const category = await this.categoryService.findOne(categoryId);
+        if (category && category.name) {
+          prefix = category.name.substring(0, 3).toUpperCase();
+        }
+      } catch (e) {}
+    } else if (type) {
+      const typePrefixes = {
+        [ProductType.RAW_MATERIAL]: 'RAW',
+        [ProductType.INSUMO]: 'INS',
+        [ProductType.FINISHED_PRODUCT]: 'FIN',
+        [ProductType.COMPONENT]: 'COM',
+      };
+      prefix = typePrefixes[type] || 'PROD';
+    }
+
+    let isUnique = false;
+    let suggestedSku = '';
+    let attempts = 0;
+
+    while (!isUnique && attempts < 15) {
+      // Sufijo de 4 caracteres alfanuméricos
+      const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+      suggestedSku = `${prefix}-${randomSuffix}`;
+
+      const existing = await this.productRepository.findOne({
+        where: { sku: suggestedSku },
+        withDeleted: true,
+      });
+
+      if (!existing) {
+        isUnique = true;
+      }
+      attempts++;
+    }
+
+    return { sku: suggestedSku };
+  }
+
+  async createWithInventory(dto: CreateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
+    // Generar SKU si no viene en el DTO (usando el nombre como base)
+    if (!dto.sku || dto.sku.trim() === '') {
+      const suggestion = await this.suggestSku(dto.name, dto.categoryId || undefined, dto.type);
+      dto.sku = suggestion.sku;
+    } else {
+      const existingSku = await this.productRepository.findOne({
+        where: { sku: dto.sku },
+        withDeleted: true,
+      });
+
+      if (existingSku) {
+        if (existingSku.deletedAt) {
+          throw new ConflictException(`El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}). Restaure el producto o use otro SKU.`);
+        }
+        throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
+      }
     }
 
     if (dto.barcode) {
@@ -79,6 +142,10 @@ export class ProductService {
       stockAvailability: dto.stockAvailability ?? StockAvailability.IN_STOCK,
       isActive: (dto.isActive ?? true) as boolean,
       isVisible: (dto.isVisible ?? true) as boolean,
+      type: (dto.type ?? ProductType.FINISHED_PRODUCT) as ProductType,
+      isVariant: (dto.isVariant ?? false) as boolean,
+      isMaster: (dto.isMaster ?? false) as boolean,
+      parent: dto.parentId ? ({ id: dto.parentId } as any) : null,
     });
 
     const savedProduct = await this.productRepository.save(product);
@@ -108,43 +175,125 @@ export class ProductService {
     });
   }
 
-  async findAll(branchId?: string, includeDeleted: boolean = false): Promise<ProductResponseDto[]> {
+  async findAll(
+    branchId?: string,
+    includeDeleted: boolean = false,
+    type?: string,
+    hasRecipe?: boolean,
+    isMaster?: boolean,
+    excludeTypes?: string[],
+    manageStock?: boolean,
+  ): Promise<ProductResponseDto[]> {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
       .leftJoinAndSelect('product.unit', 'unit')
       .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
-      .leftJoinAndSelect('product.inventories', 'inventories')
+      .leftJoinAndSelect('product.inventories', 'inventories', branchId ? 'inventories.branch_id = :branchId' : '1=1', { branchId })
       .leftJoinAndSelect('inventories.branch', 'branch')
+      .leftJoinAndSelect('product.variants', 'variants')
+      .leftJoinAndSelect('variants.inventories', 'vInventories', branchId ? 'vInventories.branch_id = :branchId' : '1=1', { branchId })
+      .leftJoinAndSelect('vInventories.branch', 'vBranch')
+      .leftJoinAndSelect('variants.unit', 'vUnit')
       .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
 
     if (includeDeleted) {
       query.withDeleted();
     }
 
-    if (branchId !== undefined) {
-      query.andWhere('branch.id = :branchId', { branchId });
+    // 1. Manejo de isMaster y parent_id (Desestructuración de variantes)
+    if (isMaster === false) {
+      // Si isMaster=false, traemos productos normales y variantes (aplanados)
+      query.andWhere('product.isMaster = :isMaster', { isMaster: false });
+    } else if (isMaster === true) {
+      // Solo productos maestros
+      query.andWhere('product.isMaster = :isMaster', { isMaster: true });
+      query.andWhere('product.parent_id IS NULL');
+    } else {
+      // Por defecto: solo productos raíz (Regulares + Maestros)
+      query.andWhere('product.parent_id IS NULL');
+    }
+
+    // 2. Filtro por tipo exacto (Inclusivo)
+    if (type) {
+      query.andWhere('product.type = :type', { type });
+    }
+
+    // 3. Filtro por exclusión de tipos
+    if (excludeTypes && excludeTypes.length > 0) {
+      const cleanExcludedTypes = excludeTypes.map(t => t.trim().toLowerCase());
+      if (cleanExcludedTypes.length > 0) {
+        query.andWhere('LOWER(product.type::text) NOT IN (:...excludedTypes)', { excludedTypes: cleanExcludedTypes });
+      }
+    }
+
+    // 4. Filtro de Recetas
+    if (hasRecipe !== undefined) {
+      if (hasRecipe) {
+        query.andWhere((qb) => {
+          const subQuery = qb
+            .subQuery()
+            .select('1')
+            .from('product_recipes', 'recipe')
+            .leftJoin('products', 'v', 'v.id = recipe.product_id')
+            .where('recipe.product_id = product.id OR v.parent_id = product.id')
+            .getQuery();
+          return `EXISTS ${subQuery}`;
+        });
+      } else {
+        query.andWhere((qb) => {
+          const subQuery = qb
+            .subQuery()
+            .select('1')
+            .from('product_recipes', 'recipe')
+            .leftJoin('products', 'v', 'v.id = recipe.product_id')
+            .where('recipe.product_id = product.id OR v.parent_id = product.id')
+            .getQuery();
+          return `NOT EXISTS ${subQuery}`;
+        });
+      }
+    }
+
+    if (manageStock !== undefined) {
+      query.andWhere('product.manageStock = :manageStock', { manageStock });
     }
 
     query.orderBy('product.name', 'ASC');
 
     const products = await query.getMany();
 
-    return products.map((p) =>
-      plainToInstance(
+    return products.map((p) => {
+      // Calcular stock total del producto raíz (debe ser 0 si es maestro sin stock directo)
+      const rootStock = p.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
+
+      // Mapear variantes con sus respectivos stocks de la sucursal
+      const mappedVariants = p.variants?.map((v) => ({
+        ...v,
+        stock: v.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0,
+        inventories: v.inventories?.map((inv) => ({
+          id: inv.id,
+          branchId: inv.branch?.id,
+          branchName: inv.branch?.name,
+          stock: inv.stock,
+        })),
+      })) || [];
+
+      return plainToInstance(
         ProductResponseDto,
         {
           ...p,
+          stock: rootStock,
+          variants: mappedVariants,
           inventories: p.inventories?.map((inv) => ({
             id: inv.id,
-            branchId: inv.branch.id,
-            branchName: inv.branch.name,
+            branchId: inv.branch?.id,
+            branchName: inv.branch?.name,
             stock: inv.stock,
           })),
         },
-        { excludeExtraneousValues: true },
-      ),
-    );
+        { excludeExtraneousValues: false },
+      );
+    });
   }
 
   async findOne(id: string, branchId?: string, includeDeleted: boolean = false): Promise<ProductResponseDto> {
@@ -155,6 +304,10 @@ export class ProductService {
       .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
       .leftJoinAndSelect('product.inventories', 'inventories')
       .leftJoinAndSelect('inventories.branch', 'branch')
+      .leftJoinAndSelect('product.variants', 'variants')
+      .leftJoinAndSelect('variants.inventories', 'vInventories')
+      .leftJoinAndSelect('vInventories.branch', 'vBranch')
+      .leftJoinAndSelect('variants.unit', 'vUnit')
       .where('product.id = :productId', { productId: id })
       .andWhere(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
 
@@ -172,24 +325,27 @@ export class ProductService {
       throw new NotFoundException(`Producto con ID ${id} no encontrado`);
     }
 
-    const stock = product.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
+    const mapProductData = (prod: any) => ({
+      ...prod,
+      stock: prod.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0,
+      inventories: prod.inventories?.map((inv) => ({
+        id: inv.id,
+        createdAt: inv.createdAt,
+        updatedAt: inv.updatedAt,
+        product: inv.product,
+        branch: inv.branch,
+        stock: inv.stock,
+        minStock: inv.minStock,
+        maxStock: inv.maxStock,
+        lastMovementDate: inv.lastMovementDate,
+      })),
+    });
 
     return plainToInstance(
       ProductResponseDto,
       {
-        ...product,
-        stock,
-        inventories: product.inventories?.map((inv) => ({
-          id: inv.id,
-          createdAt: inv.createdAt,
-          updatedAt: inv.updatedAt,
-          product: inv.product,
-          branch: inv.branch,
-          stock: inv.stock,
-          minStock: inv.minStock,
-          maxStock: inv.maxStock,
-          lastMovementDate: inv.lastMovementDate,
-        })),
+        ...mapProductData(product),
+        variants: product.variants?.map((v) => mapProductData(v)),
       },
       { excludeExtraneousValues: false },
     );
@@ -255,26 +411,28 @@ export class ProductService {
       }
     }
 
-    if (dto.price !== undefined && dto.cost !== undefined && dto.price < dto.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
-    } else if (dto.price !== undefined && dto.price < product.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
-    } else if (dto.cost !== undefined && product.price < dto.cost) {
-      throw new BadRequestException('El precio debe ser mayor o igual al costo');
-    }
-
     let imageUrl = product.imageUrl;
+    // Si viene una nueva imagen física (Archivo)
     if (image) {
       if (product.imageUrl) {
         await this.fileService.deleteProductImage(product.imageUrl);
       }
-
       imageUrl = await this.fileService.saveProductImage(image);
+    } 
+    // Si NO viene archivo, pero el campo imageUrl está presente en el DTO
+    else if (dto.imageUrl !== undefined) {
+      // Si el valor indica que quieren borrarla (null, vacío o string "null")
+      if (dto.imageUrl === null || dto.imageUrl === '' || dto.imageUrl === 'null') {
+        if (product.imageUrl) {
+          await this.fileService.deleteProductImage(product.imageUrl);
+        }
+        imageUrl = null;
+      }
     }
-
+    
     let category: any = product.category;
     if (dto.categoryId !== undefined) {
-      if (dto.categoryId === null) {
+      if (dto.categoryId === null || dto.categoryId === 'null') {
         category = null;
       } else {
         try {
@@ -287,7 +445,7 @@ export class ProductService {
 
     let unit: any = product.unit;
     if (dto.unitId !== undefined) {
-      if (dto.unitId === null) {
+      if (dto.unitId === null || dto.unitId === 'null') {
         unit = null;
       } else {
         try {
@@ -312,6 +470,10 @@ export class ProductService {
       stockAvailability: dto.stockAvailability ?? product.stockAvailability,
       isActive: (dto.isActive ?? product.isActive) as boolean,
       isVisible: (dto.isVisible ?? product.isVisible) as boolean,
+      type: (dto.type ?? product.type) as ProductType,
+      isVariant: (dto.isVariant ?? product.isVariant) as boolean,
+      isMaster: (dto.isMaster ?? product.isMaster) as boolean,
+      parent: dto.parentId !== undefined ? (dto.parentId && dto.parentId !== 'null' ? ({ id: dto.parentId } as any) : null) : product.parent,
     });
 
     const updatedProduct = await this.productRepository.save(product);
@@ -356,7 +518,15 @@ export class ProductService {
     return plainToInstance(ProductResponseDto, restoredProduct);
   }
 
-  async searchProducts(query: string, branchId?: string, includeDeleted: boolean = false): Promise<ProductResponseDto[]> {
+  async searchProducts(
+    query: string, 
+    branchId?: string, 
+    includeDeleted: boolean = false, 
+    type?: string,
+    isMaster?: boolean,
+    manageStock?: boolean,
+    excludeTypes?: string[],
+  ): Promise<ProductResponseDto[]> {
     const queryBuilder = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -365,14 +535,45 @@ export class ProductService {
       .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL')
       .andWhere('(product.name ILIKE :query OR product.sku ILIKE :query OR product.barcode ILIKE :query OR product.description ILIKE :query)', { query: `%${query}%` });
 
+    if (type) {
+      queryBuilder.andWhere('product.type = :type', { type });
+    }
+
+    if (isMaster !== undefined) {
+      queryBuilder.andWhere('product.isMaster = :isMaster', { isMaster });
+    }
+
+    if (manageStock !== undefined) {
+      queryBuilder.andWhere('product.manageStock = :manageStock', { manageStock });
+    }
+
+    if (excludeTypes && excludeTypes.length > 0) {
+      const cleanExcludedTypes = excludeTypes.map(t => t.trim().toLowerCase()).filter(t => t.length > 0);
+      if (cleanExcludedTypes.length > 0) {
+        queryBuilder.andWhere('LOWER(product.type::text) NOT IN (:...excludedTypes)', { excludedTypes: cleanExcludedTypes });
+      }
+    }
+
     if (includeDeleted) {
       queryBuilder.withDeleted();
     }
 
     if (branchId) {
-      queryBuilder.innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
+      queryBuilder
+        .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId })
+        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
+        .groupBy('product.id')
+        .addGroupBy('category.id')
+        .addGroupBy('unit.id')
+        .addGroupBy('defaultUnit.id');
     } else {
-      queryBuilder.leftJoin('inventories', 'inventory', 'inventory.product_id = product.id').addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock').groupBy('product.id').addGroupBy('category.id').addGroupBy('unit.id').addGroupBy('defaultUnit.id');
+      queryBuilder
+        .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id')
+        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'stock')
+        .groupBy('product.id')
+        .addGroupBy('category.id')
+        .addGroupBy('unit.id')
+        .addGroupBy('defaultUnit.id');
     }
 
     queryBuilder.orderBy('product.name', 'ASC');
@@ -491,5 +692,48 @@ export class ProductService {
       dto.unitAbbreviation = p.unit_abbreviation;
       return dto;
     });
+  }
+
+  async getDispatchableCatalog(branchId?: string, excludeTypes?: string[]): Promise<ProductResponseDto[]> {
+    const query = this.productRepository
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.category', 'category')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('category.defaultUnit', 'defaultUnit')
+      .leftJoinAndSelect('product.inventories', 'inventories', branchId ? 'inventories.branch_id = :branchId' : '1=1', { branchId })
+      .leftJoinAndSelect('inventories.branch', 'branch')
+      .where('product.deletedAt IS NULL')
+      .andWhere('product.isActive = :isActive', { isActive: true })
+      .andWhere('product.manageStock = :manageStock', { manageStock: true })
+      .andWhere('product.isMaster = :isMaster', { isMaster: false }); // Desestructurar: No traer maestros
+
+    if (excludeTypes && excludeTypes.length > 0) {
+      const cleanExcludedTypes = excludeTypes.map((t) => t.trim().toLowerCase());
+      if (cleanExcludedTypes.length > 0) {
+        query.andWhere('LOWER(product.type::text) NOT IN (:...excludedTypes)', { excludedTypes: cleanExcludedTypes });
+      }
+    }
+
+    query.orderBy('product.name', 'ASC');
+
+    const products = await query.getMany();
+
+    return products.map((p) => {
+      const stock = p.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
+      return plainToInstance(
+        ProductResponseDto,
+        {
+          ...p,
+          stock,
+          inventories: p.inventories?.map((inv) => ({
+            id: inv.id,
+            branchId: inv.branch?.id,
+            branchName: inv.branch?.name,
+            stock: inv.stock,
+          })),
+        },
+        { excludeExtraneousValues: false },
+      );
+    }).filter((p) => (p.stock || 0) > 0);
   }
 }

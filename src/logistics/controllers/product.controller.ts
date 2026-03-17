@@ -13,6 +13,33 @@ import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
+  @Get('dispatch-catalog')
+  @Permissions('products.manage')
+  async getDispatchableCatalog(
+    @Req() req,
+    @Query('branchId') branchIdParam?: string,
+    @Query('excludeTypes') excludeTypes?: string,
+  ): Promise<ProductResponseDto[]> {
+    const user = req.user;
+    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
+    const excludeTypesArray = excludeTypes ? excludeTypes.split(',') : undefined;
+
+    return this.productService.getDispatchableCatalog(branchId, excludeTypesArray);
+  }
+
+  @Get('suggest-sku')
+  @Permissions('products.manage')
+  async suggestSku(
+    @Query('name') name?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('type') type?: string,
+  ) {
+    if (!name && !categoryId && !type) {
+      throw new BadRequestException('Debe proporcionar al menos el nombre del producto para sugerir un SKU');
+    }
+    return this.productService.suggestSku(name, categoryId, type as any);
+  }
+
   @Post()
   @Public()
   @HttpCode(HttpStatus.CREATED)
@@ -24,21 +51,43 @@ export class ProductController {
 
   @Get()
   @Permissions('products.manage')
-  async findAll(@Req() req, @Query('includeDeleted') includeDeleted: string): Promise<ProductResponseDto[]> {
+  async findAll(
+    @Req() req,
+    @Query('branchId') branchIdParam?: string,
+    @Query('includeDeleted') includeDeleted?: string,
+    @Query('type') type?: string,
+    @Query('hasRecipe') hasRecipe?: string,
+    @Query('isMaster') isMaster?: string,
+    @Query('excludeTypes') excludeTypes?: string,
+    @Query('manageStock') manageStock?: string,
+  ): Promise<ProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
-
-    const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
+    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
 
     if (!isSuperAdmin(user) && !branchId) {
       throw new ForbiddenException('Usuario sin sucursal asignada');
     }
 
-    return this.productService.findAll(branchId, showDeleted);
+    const hasRecipeBool = hasRecipe === 'true' ? true : hasRecipe === 'false' ? false : undefined;
+    const isMasterBool = isMaster === 'true' ? true : isMaster === 'false' ? false : undefined;
+    const manageStockBool = manageStock === 'true' ? true : manageStock === 'false' ? false : undefined;
+    const excludeTypesArray = excludeTypes ? excludeTypes.split(',') : undefined;
+
+    return this.productService.findAll(branchId, showDeleted, type, hasRecipeBool, isMasterBool, excludeTypesArray, manageStockBool);
   }
 
   @Get('search')
-  async search(@Query('q') query: string, @Query('branchId') branchIdParam: string, @Query('includeDeleted') includeDeleted: string, @Req() req): Promise<ProductResponseDto[]> {
+  async search(
+    @Query('q') query: string, 
+    @Query('branchId') branchIdParam: string, 
+    @Query('includeDeleted') includeDeleted: string, 
+    @Query('type') type: string,
+    @Query('isMaster') isMaster: string,
+    @Query('manageStock') manageStock: string,
+    @Query('excludeTypes') excludeTypes: string,
+    @Req() req
+  ): Promise<ProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
@@ -48,7 +97,11 @@ export class ProductController {
       throw new ForbiddenException('Usuario sin sucursal asignada');
     }
 
-    return this.productService.searchProducts(query, branchId, showDeleted);
+    const isMasterBool = isMaster === 'true' ? true : isMaster === 'false' ? false : undefined;
+    const manageStockBool = manageStock === 'true' ? true : manageStock === 'false' ? false : undefined;
+    const excludeTypesArray = excludeTypes ? excludeTypes.split(',') : undefined;
+
+    return this.productService.searchProducts(query, branchId, showDeleted, type, isMasterBool, manageStockBool, excludeTypesArray);
   }
 
   @Get('top-selling')

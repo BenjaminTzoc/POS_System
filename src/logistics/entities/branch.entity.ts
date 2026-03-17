@@ -17,6 +17,9 @@ export class Branch extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   email?: string;
 
+  @Column({ name: 'is_plant', type: 'boolean', default: false })
+  isPlant: boolean;
+
   @OneToMany(() => User, (user) => user.branch)
   users: User[];
 

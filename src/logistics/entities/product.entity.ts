@@ -12,6 +12,13 @@ export enum StockAvailability {
   LIMITED = 'limited',
 }
 
+export enum ProductType {
+  RAW_MATERIAL = 'raw_material', // Materia prima (Animal en pie/canal)
+  INSUMO = 'insumo',            // Ingredientes (Especias, tripa)
+  FINISHED_PRODUCT = 'finished_product', // Producto terminado (Chorizo)
+  COMPONENT = 'component',       // Cortes intermedios (Posta, Lomo)
+}
+
 @Entity('products')
 export class Product extends BaseEntity {
   @Column({ length: 100 })
@@ -33,7 +40,7 @@ export class Product extends BaseEntity {
   price: number;
 
   @Column({ type: 'text', nullable: true })
-  imageUrl?: string;
+  imageUrl?: string | null;
 
   @ManyToOne(() => Category, { eager: true, nullable: true })
   @JoinColumn({ name: 'category_id' })
@@ -62,6 +69,26 @@ export class Product extends BaseEntity {
     default: StockAvailability.IN_STOCK,
   })
   stockAvailability: StockAvailability;
+
+  @Column({
+    type: 'enum',
+    enum: ProductType,
+    default: ProductType.FINISHED_PRODUCT,
+  })
+  type: ProductType;
+
+  @Column({ type: 'boolean', default: false })
+  isVariant: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  isMaster: boolean;
+
+  @ManyToOne(() => Product, (product) => product.variants, { nullable: true })
+  @JoinColumn({ name: 'parent_id' })
+  parent?: Product;
+
+  @OneToMany(() => Product, (product) => product.parent)
+  variants: Product[];
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;

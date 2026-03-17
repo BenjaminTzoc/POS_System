@@ -15,8 +15,8 @@ export class CreateBranchDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\+?[0-9\s\-\(\)]{10,20}$/, {
-    message: 'El formato del teléfono no es válido',
+  @Matches(/^[0-9\s\-\+\(\)]{8,20}$/, {
+    message: 'El formato del teléfono no es válido (debe tener al menos 8 dígitos)',
   })
   phone?: string;
 
@@ -24,6 +24,9 @@ export class CreateBranchDto {
   @IsEmail()
   @MaxLength(100)
   email?: string;
+
+  @IsOptional()
+  isPlant?: boolean;
 }
 
 export class UpdateBranchDto {
@@ -39,8 +42,8 @@ export class UpdateBranchDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\+?[0-9\s\-\(\)]{10,20}$/, {
-    message: 'El formato del teléfono no es válido',
+  @Matches(/^[0-9\s\-\+\(\)]{8,20}$/, {
+    message: 'El formato del teléfono no es válido (debe tener al menos 8 dígitos)',
   })
   phone?: string;
 
@@ -48,6 +51,9 @@ export class UpdateBranchDto {
   @IsEmail()
   @MaxLength(100)
   email?: string;
+
+  @IsOptional()
+  isPlant?: boolean;
 }
 
 export class BranchResponseDto extends BaseEntity {
@@ -62,6 +68,9 @@ export class BranchResponseDto extends BaseEntity {
 
   @Expose()
   email: string;
+
+  @Expose()
+  isPlant: boolean;
 
   @Expose()
   declare createdAt: Date;

@@ -7,5 +7,6 @@ export { CreateSalePaymentDto, UpdateSalePaymentDto, SalePaymentResponseDto } fr
 export { GuestCustomerDto } from './sales/guest-customer.dto';
 export { CreateSaleDto, UpdateSaleDto } from './sales/sales.dto';
 export { SaleResponseDto } from './sales/sale-response.dto';
+export { PaginatedSaleResponseDto } from './sales/paginated-sale-response.dto';
 export { SaleFilterDto } from './sale-filter.dto';
 export { CreateQuotationDto, UpdateQuotationStatusDto, QuotationResponseDto, QuotationItemResponseDto } from './quotation.dto';

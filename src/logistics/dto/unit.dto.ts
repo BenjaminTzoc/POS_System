@@ -44,6 +44,8 @@ export class UpdateUnitDto {
 
 export class UnitResponseDto extends BaseEntity {
   @Expose()
+  declare id: string;
+  @Expose()
   name: string;
 
   @Expose()

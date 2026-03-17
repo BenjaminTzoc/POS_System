@@ -74,10 +74,10 @@ export class PurchaseController {
     return this.purchaseService.cancel(id);
   }
 
-  @Post(':id/receive/:branchId')
+  @Post(':id/receive')
   @Public()
   @HttpCode(HttpStatus.OK)
-  receivePurchase(@Param('id', ParseUUIDPipe) id: string, @Param('branchId', ParseUUIDPipe) branchId: string): Promise<PurchaseResponseDto> {
+  receivePurchase(@Param('id', ParseUUIDPipe) id: string, @Body('branchId', ParseUUIDPipe) branchId: string): Promise<PurchaseResponseDto> {
     return this.purchaseService.receivePurchase(id, branchId);
   }
 

@@ -4,6 +4,7 @@ import { Branch } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { BranchResponseDto, CreateBranchDto, UpdateBranchDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
+import { formatGuatemalaPhone } from '../../common/utils/phone-formatter.util';
 
 @Injectable()
 export class BranchService {
@@ -25,13 +26,23 @@ export class BranchService {
       throw new ConflictException(`La sucursal '${dto.name}' ya existe`);
     }
 
+    if (dto.phone) {
+      dto.phone = formatGuatemalaPhone(dto.phone);
+    }
+
     const branch = this.branchRepository.create(dto);
     const savedBranch = await this.branchRepository.save(branch);
     return plainToInstance(BranchResponseDto, savedBranch);
   }
 
-  async findAll(includeDeleted: boolean = false): Promise<BranchResponseDto[]> {
+  async findAll(includeDeleted: boolean = false, isPlant?: boolean): Promise<BranchResponseDto[]> {
+    const where: any = {};
+    if (isPlant !== undefined) {
+      where.isPlant = isPlant;
+    }
+
     const branches = await this.branchRepository.find({
+      where,
       withDeleted: includeDeleted,
       order: { name: 'ASC' },
     });
@@ -72,6 +83,10 @@ export class BranchService {
         }
         throw new ConflictException(`La sucursal '${dto.name}' ya existe`);
       }
+    }
+
+    if (dto.phone) {
+      dto.phone = formatGuatemalaPhone(dto.phone);
     }
 
     Object.assign(branch, dto);
@@ -124,13 +139,17 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, restoredBranch);
   }
 
-  async searchBranches(query: string, includeDeleted: boolean = false): Promise<BranchResponseDto[]> {
+  async searchBranches(query: string, includeDeleted: boolean = false, isPlant?: boolean): Promise<BranchResponseDto[]> {
     const queryBuilder = this.branchRepository.createQueryBuilder('branch');
 
     if (!includeDeleted) {
       queryBuilder.where('branch.deletedAt IS NULL');
     } else {
       queryBuilder.withDeleted();
+    }
+
+    if (isPlant !== undefined) {
+      queryBuilder.andWhere('branch.is_plant = :isPlant', { isPlant });
     }
 
     const branches = await queryBuilder

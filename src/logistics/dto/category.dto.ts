@@ -35,6 +35,8 @@ export class UpdateCategoryDto {
 
 export class CategoryResponseDto extends BaseEntity {
   @Expose()
+  declare id: string;
+  @Expose()
   name: string;
 
   @Expose()

@@ -25,6 +25,10 @@ export enum MovementConcept {
   ADJUSTMENT = 'adjustment',
   WASTE = 'waste',
   RETURN = 'return',
+  PRODUCTION = 'production',
+  DECOMPOSITION = 'decomposition',
+  ROUTE_DISPATCH = 'route_dispatch',
+  ROUTE_RETURN = 'route_return',
 }
 
 @Entity('inventory_movements')

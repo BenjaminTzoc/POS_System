@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsNotEmpty, IsUUID, IsEmail, IsNumber, Min, IsDateString, Matches } from 'class-validator';
-import { Type, Expose } from 'class-transformer';
+import { Transform, Type, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { CustomerCategoryResponseDto } from '.';
 
@@ -39,6 +39,7 @@ export class CreateCustomerDto {
   birthDate?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsUUID()
   categoryId?: string;
 
@@ -90,6 +91,7 @@ export class UpdateCustomerDto {
   birthDate?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsUUID()
   categoryId?: string;
 

@@ -62,7 +62,7 @@ export class TransferItemResponseDto {
   subtotal: number;
 
   @Expose()
-  imageUrl?: string;
+  imageUrl?: string | null;
 }
 
 export class InventoryTransferResponseDto {

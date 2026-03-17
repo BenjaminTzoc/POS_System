@@ -1,9 +1,10 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min, IsEnum, IsBoolean, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, MaxLength, Min, IsEnum, IsBoolean, ValidateNested, ValidateIf } from 'class-validator';
 import { Type, Expose, Transform } from 'class-transformer';
 import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { UnitResponseDto } from './unit.dto';
-import { StockAvailability } from '../entities/product.entity';
+import { CategoryResponseDto } from './category.dto';
+import { StockAvailability, ProductType } from '../entities/product.entity';
 
 class InitialStockDto {
   @IsNotEmpty()
@@ -34,10 +35,10 @@ export class CreateProductDto {
   @IsString()
   description?: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   @MaxLength(50)
-  sku: string;
+  sku?: string;
 
   @IsOptional()
   @IsString()
@@ -47,20 +48,24 @@ export class CreateProductDto {
   @IsNotEmpty()
   @IsNumber()
   @Min(0)
+  @Type(() => Number)
   cost: number;
 
   @IsNotEmpty()
   @IsNumber()
-  @Min(0.01)
+  @Min(0)
+  @Type(() => Number)
   price: number;
 
+  @ValidateIf((o) => o.categoryId !== null)
   @IsOptional()
   @IsUUID()
-  categoryId?: string;
+  categoryId?: string | null;
 
+  @ValidateIf((o) => o.unitId !== null)
   @IsOptional()
   @IsUUID()
-  unitId?: string;
+  unitId?: string | null;
 
   @IsOptional()
   @IsBoolean()
@@ -85,6 +90,25 @@ export class CreateProductDto {
   @IsBoolean()
   @TransformBoolean()
   isVisible?: boolean | string;
+
+  @IsNotEmpty()
+  @IsEnum(ProductType)
+  type: ProductType;
+
+  @IsOptional()
+  @IsBoolean()
+  @TransformBoolean()
+  isVariant?: boolean | string;
+
+  @IsOptional()
+  @IsBoolean()
+  @TransformBoolean()
+  isMaster?: boolean | string;
+
+  @ValidateIf((o) => o.parentId !== null)
+  @IsOptional()
+  @IsUUID()
+  parentId?: string | null;
 }
 
 export class UpdateProductDto extends PartialType(OmitType(CreateProductDto, ['initialStocks'] as const)) {
@@ -102,6 +126,42 @@ export class UpdateProductDto extends PartialType(OmitType(CreateProductDto, ['i
   @IsBoolean()
   @TransformBoolean()
   isVisible?: boolean | string;
+
+  @IsOptional()
+  @IsEnum(ProductType)
+  type?: ProductType;
+
+  @IsOptional()
+  @IsBoolean()
+  @TransformBoolean()
+  isVariant?: boolean | string;
+
+  @IsOptional()
+  @IsBoolean()
+  @TransformBoolean()
+  isMaster?: boolean | string;
+
+  @ValidateIf((o) => o.categoryId !== null)
+  @IsOptional()
+  @IsUUID()
+  @Transform(({ value }) => (value === 'null' || value === '' ? null : value))
+  categoryId?: string | null;
+
+  @ValidateIf((o) => o.unitId !== null)
+  @IsOptional()
+  @IsUUID()
+  @Transform(({ value }) => (value === 'null' || value === '' ? null : value))
+  unitId?: string | null;
+
+  @ValidateIf((o) => o.parentId !== null)
+  @IsOptional()
+  @IsUUID()
+  @Transform(({ value }) => (value === 'null' || value === '' ? null : value))
+  parentId?: string | null;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === 'null' || value === '' ? null : value))
+  imageUrl?: string | null;
 }
 
 export class BranchProductResponseDto {
@@ -171,6 +231,22 @@ export class ProductResponseDto extends BaseEntity {
   isVisible: boolean;
 
   @Expose()
+  type: ProductType;
+
+  @Expose()
+  isVariant: boolean;
+
+  @Expose()
+  isMaster: boolean;
+
+  @Expose()
+  parentId: string | null;
+
+  @Expose()
+  @Type(() => ProductResponseDto)
+  variants: ProductResponseDto[];
+
+  @Expose()
   stock: number | null;
 
   @Expose()
@@ -179,6 +255,10 @@ export class ProductResponseDto extends BaseEntity {
 
   @Expose()
   area: any | null;
+
+  @Expose()
+  @Type(() => CategoryResponseDto)
+  category: CategoryResponseDto | null;
 
   @Expose()
   declare createdAt: Date;

@@ -17,15 +17,17 @@ export class BranchController {
   }
 
   @Get()
-  findAll(@Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<BranchResponseDto[]> {
+  findAll(@Query('includeDeleted') includeDeleted: string, @Query('isPlant') isPlant: string, @User() user: any): Promise<BranchResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
-    return this.branchService.findAll(showDeleted);
+    const filterIsPlant = isPlant === 'true' ? true : isPlant === 'false' ? false : undefined;
+    return this.branchService.findAll(showDeleted, filterIsPlant);
   }
 
   @Get('search')
-  search(@Query('q') query: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<BranchResponseDto[]> {
+  search(@Query('q') query: string, @Query('includeDeleted') includeDeleted: string, @Query('isPlant') isPlant: string, @User() user: any): Promise<BranchResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
-    return this.branchService.searchBranches(query, showDeleted);
+    const filterIsPlant = isPlant === 'true' ? true : isPlant === 'false' ? false : undefined;
+    return this.branchService.searchBranches(query, showDeleted, filterIsPlant);
   }
 
   @Get('stats')

@@ -294,6 +294,13 @@ export class PurchaseService {
         );
       }
 
+      // Actualizar el estado de la compra a PAGADA al recibirla
+      await queryRunner.manager.update(Purchase, purchase.id, {
+        status: PurchaseStatus.PAID,
+        paidAmount: purchase.total,
+        pendingAmount: 0,
+      });
+
       await queryRunner.commitTransaction();
       return this.findOne(id);
     } catch (error) {

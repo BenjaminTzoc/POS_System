@@ -159,6 +159,7 @@ export class InventoryMovementService {
     return plainToInstance(InventoryMovementResponseDto, movements);
   }
 
+
   async findByType(type: MovementType): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
       where: {
@@ -170,6 +171,16 @@ export class InventoryMovementService {
     });
     return plainToInstance(InventoryMovementResponseDto, movements);
   }
+
+  async findByReferenceId(referenceId: string): Promise<InventoryMovementResponseDto[]> {
+    const movements = await this.movementRepository.find({
+      where: { referenceId, deletedAt: IsNull() },
+      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      order: { createdAt: 'ASC' },
+    });
+    return plainToInstance(InventoryMovementResponseDto, movements);
+  }
+
 
   async update(id: string, dto: UpdateInventoryMovementDto): Promise<InventoryMovementResponseDto> {
     const movement = await this.movementRepository.findOne({

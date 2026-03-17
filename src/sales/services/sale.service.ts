@@ -4,7 +4,7 @@ import { Sale, SaleDetail, SaleStatus, DiscountType } from '../entities';
 import { DataSource, IsNull, Like, Repository } from 'typeorm';
 import { CustomerService, DiscountCodeService } from '.';
 import { BranchService, InventoryMovementService, ProductService } from 'src/logistics/services';
-import { CreateSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
+import { CreateSaleDto, PaginatedSaleResponseDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { Branch, Inventory, MovementStatus, MovementType, MovementConcept, Area } from 'src/logistics/entities';
 import { SaleGateway } from '../gateway/sale.gateway';
@@ -256,109 +256,105 @@ export class SaleService {
   }
 
   async findAll(filterDto: SaleFilterDto): Promise<any> {
-    const { status, branchId, startDate, endDate, areaId, onlyAreaDetails, groupBy, page, limit, search } = filterDto;
+    const { status, branchId, startDate, endDate, areaId, onlyAreaDetails, groupBy, page = 1, limit = 50, search } = filterDto;
 
-    const queryBuilder = this.saleRepository.createQueryBuilder('sale').leftJoinAndSelect('sale.customer', 'customer').leftJoinAndSelect('customer.category', 'customerCategory').leftJoinAndSelect('sale.discountCode', 'discountCode').leftJoinAndSelect('sale.branch', 'branch');
+    // 1. Build Query
+    const query = this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .leftJoinAndSelect('customer.category', 'customerCategory')
+      .leftJoinAndSelect('sale.branch', 'branch')
+      .where('sale.deletedAt IS NULL');
 
-    if (!groupBy) {
-      queryBuilder.leftJoinAndSelect('sale.details', 'details').leftJoinAndSelect('details.product', 'product').leftJoinAndSelect('product.unit', 'unit').leftJoinAndSelect('product.area', 'area').leftJoinAndSelect('sale.payments', 'payments').leftJoinAndSelect('payments.paymentMethod', 'paymentMethod').leftJoinAndSelect('payments.bankAccount', 'bankAccount');
+    // 2. Load details only if needed (Kanban or worklists)
+    const needsDetails = groupBy || areaId || onlyAreaDetails;
+    if (needsDetails) {
+      query
+        .leftJoinAndSelect('sale.details', 'details')
+        .leftJoinAndSelect('details.product', 'product')
+        .leftJoinAndSelect('product.unit', 'unit')
+        .leftJoinAndSelect('product.area', 'area')
+        .leftJoinAndSelect('details.currentArea', 'currentArea');
     }
 
-    queryBuilder.where('sale.deletedAt IS NULL');
-
-    if (status) {
-      queryBuilder.andWhere('sale.status = :status', { status });
-    }
-
-    if (branchId) {
-      queryBuilder.andWhere('branch.id = :branchId', { branchId });
-    }
-
+    // 3. Apply Filters
+    if (status) query.andWhere('sale.status = :status', { status });
+    if (branchId) query.andWhere('branch.id = :branchId', { branchId });
     if (search) {
-      queryBuilder.andWhere('(sale.invoiceNumber ILIKE :search OR customer.name ILIKE :search OR customer.nit ILIKE :search)', { search: `%${search}%` });
+      query.andWhere('(sale.invoiceNumber ILIKE :search OR customer.name ILIKE :search OR customer.nit ILIKE :search)', {
+        search: `%${search}%`,
+      });
     }
 
-    let start = startDate ? new Date(startDate) : null;
-    let end = endDate ? new Date(endDate) : null;
-
-    if (!start && !end && !search) {
-      start = new Date();
+    // Date Filters
+    if (startDate || endDate) {
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.andWhere('sale.date >= :start', { start });
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.andWhere('sale.date <= :end', { end });
+      }
+    } else if (!search) {
+      // Default: Last 6 months
+      const start = new Date();
       start.setMonth(start.getMonth() - 6);
       start.setHours(0, 0, 0, 0);
+      query.andWhere('sale.date >= :start', { start });
     }
 
-    if (start && end) {
-      end.setHours(23, 59, 59, 999);
-      queryBuilder.andWhere('sale.date BETWEEN :start AND :end', { start, end });
-    } else if (start) {
-      queryBuilder.andWhere('sale.date >= :start', { start });
-    } else if (end) {
-      end.setHours(23, 59, 59, 999);
-      queryBuilder.andWhere('sale.date <= :end', { end });
-    }
+    if (areaId) query.andWhere('details.currentArea = :areaId', { areaId });
 
-    if (areaId) {
-      if (groupBy) {
-        queryBuilder.leftJoinAndSelect('sale.details', 'details').leftJoinAndSelect('details.product', 'product');
-      }
-      queryBuilder.andWhere('details.current_area_id = :areaId', { areaId });
-    }
+    query.orderBy('sale.date', 'DESC').addOrderBy('sale.createdAt', 'DESC');
 
-    queryBuilder.orderBy('sale.date', 'DESC').addOrderBy('sale.createdAt', 'DESC');
-
+    // 4. If GroupBy is present, we handle the special formatted response (Kanban/Preparation)
+    // IMPORTANT: Table view calls this without groupBy if it wants a flat list.
     if (groupBy) {
-      const sales = await queryBuilder.getMany();
-      const response = plainToInstance(SaleResponseDto, sales);
+      const allSales = await query.getMany();
+      const instanceResponse = plainToInstance(SaleResponseDto, allSales);
 
       if (groupBy === 'status') {
-        return response.reduce(
-          (acc, sale) => {
-            const key = sale.status;
-            if (!acc[key]) acc[key] = { total: 0, orders: [] };
-            acc[key].orders.push(sale);
-            acc[key].total++;
-            return acc;
-          },
-          {} as Record<string, any>,
-        );
+        const grouped = instanceResponse.reduce((acc, sale) => {
+          const key = sale.status;
+          if (!acc[key]) acc[key] = { total: 0, orders: [] };
+          acc[key].orders.push(sale);
+          acc[key].total++;
+          return acc;
+        }, {} as Record<string, any>);
+        return grouped;
       }
 
       if (groupBy === 'preparationStatus') {
-        const groupedItems: Record<string, any> = {};
-        response.forEach((sale) => {
+        const items: Record<string, any> = {};
+        instanceResponse.forEach((sale) => {
           sale.details?.forEach((detail: any) => {
             if (areaId && detail.currentArea?.id !== areaId) return;
-
             const key = detail.preparationStatus || 'pending';
-            if (!groupedItems[key]) groupedItems[key] = { total: 0, items: [] };
-
-            const itemWithSale = {
-              ...detail,
-              saleId: sale.id,
-              invoiceNumber: sale.invoiceNumber,
-              customerName: sale.customer?.name,
-            };
-
-            groupedItems[key].items.push(itemWithSale);
-            groupedItems[key].total++;
+            if (!items[key]) items[key] = { total: 0, items: [] };
+            items[key].items.push({ ...detail, saleId: sale.id, invoiceNumber: sale.invoiceNumber, customerName: sale.customer?.name });
+            items[key].total++;
           });
         });
-        return groupedItems;
+        return items;
       }
     }
 
-    const take = limit || 50;
-    const skip = ((page || 1) - 1) * take;
+    // 5. Default Paginated Response (Table View)
+    const take = Number(limit);
+    const skip = (Math.max(Number(page), 1) - 1) * take;
 
-    const [sales, total] = await queryBuilder.skip(skip).take(take).getManyAndCount();
+    const [sales, total] = await query.skip(skip).take(take).getManyAndCount();
 
-    return {
-      data: plainToInstance(SaleResponseDto, sales),
+    // Use the DTO to ensure the "data" field exists in the output
+    return plainToInstance(PaginatedSaleResponseDto, {
+      data: sales,
       total,
-      page: page || 1,
+      page: Number(page),
       limit: take,
-      lastPage: Math.ceil(total / take),
-    };
+    });
   }
 
   async findOne(id: string): Promise<SaleResponseDto> {
