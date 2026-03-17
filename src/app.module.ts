@@ -33,6 +33,12 @@ import { SeedModule } from './common/seed/seed.module';
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: true,
         logging: true,
+        ssl: configService.get('DB_SSL') === 'true',
+        extra: configService.get('DB_SSL') === 'true' ? {
+          ssl: {
+            rejectUnauthorized: false,
+          },
+        } : {},
       }),
       inject: [ConfigService],
     }),
