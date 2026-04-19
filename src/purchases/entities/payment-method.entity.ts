@@ -16,9 +16,6 @@ export class PaymentMethod extends BaseEntity {
   @Column({ name: 'requires_bank_account', default: false })
   requiresBankAccount: boolean;
 
-  @Column({ name: 'is_active', default: true })
-  isActive: boolean;
-
   @OneToMany(() => PurchasePayment, (payment) => payment.paymentMethod)
   payments: PurchasePayment[];
 }

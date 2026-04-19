@@ -10,3 +10,4 @@ export { SaleResponseDto } from './sales/sale-response.dto';
 export { PaginatedSaleResponseDto } from './sales/paginated-sale-response.dto';
 export { SaleFilterDto } from './sale-filter.dto';
 export { CreateQuotationDto, UpdateQuotationStatusDto, QuotationResponseDto, QuotationItemResponseDto } from './quotation.dto';
+export { QuickSaleDto, QuickSalePaymentDto } from './sales/quick-sale.dto';

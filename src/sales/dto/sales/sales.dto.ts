@@ -6,10 +6,10 @@ import { CreateSaleDiscountDto } from '../sale-discounts/create-sale-discount.dt
 import { OmitType, PartialType } from '@nestjs/mapped-types';
 
 export class CreateSaleDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   @MaxLength(50)
-  invoiceNumber: string;
+  invoiceNumber?: string;
 
   @IsOptional()
   @IsDateString()

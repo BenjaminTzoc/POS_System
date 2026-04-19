@@ -21,9 +21,6 @@ export class CreatePaymentMethodDto {
   @IsBoolean()
   requiresBankAccount?: boolean;
 
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
 }
 
 export class UpdatePaymentMethodDto {
@@ -45,9 +42,6 @@ export class UpdatePaymentMethodDto {
   @IsBoolean()
   requiresBankAccount?: boolean;
 
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
 }
 
 export class PaymentMethodResponseDto extends BaseEntity {
@@ -63,8 +57,6 @@ export class PaymentMethodResponseDto extends BaseEntity {
   @Expose()
   requiresBankAccount: boolean;
 
-  @Expose()
-  isActive: boolean;
 
   @Expose()
   declare createdAt: Date;

@@ -34,9 +34,6 @@ export class PurchasePaymentService {
       throw new BadRequestException(`El método de pago con ID ${dto.paymentMethodId} no existe`);
     }
 
-    if (!paymentMethod.isActive) {
-      throw new BadRequestException('El método de pago no está activo');
-    }
 
     if (paymentMethod.requiresBankAccount && !dto.bankAccount) {
       throw new BadRequestException('Este método de pago requiere una cuenta bancaria');

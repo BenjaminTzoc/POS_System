@@ -36,9 +36,10 @@ export class PaymentMethodService {
     return plainToInstance(PaymentMethodResponseDto, savedPaymentMethod);
   }
 
-  async findAll(): Promise<PaymentMethodResponseDto[]> {
+  async findAll(includeDeleted: boolean = false): Promise<PaymentMethodResponseDto[]> {
     const paymentMethods = await this.paymentMethodRepository.find({
-      where: { deletedAt: IsNull() },
+      where: includeDeleted ? {} : { deletedAt: IsNull() },
+      withDeleted: includeDeleted,
       order: { createdAt: 'ASC' },
     });
     return plainToInstance(PaymentMethodResponseDto, paymentMethods);

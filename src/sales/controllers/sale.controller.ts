@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { SaleService } from '../services';
-import { CreateSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
+import { CreateSaleDto, QuickSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { UpdateDetailStatusDto } from '../dto/update-detail-status.dto';
 import { SaleStatus } from '../entities';
 import { Permissions, Public } from 'src/auth/decorators';
@@ -34,6 +34,23 @@ export class SaleController {
 
     dto.branchId = user.branch.id;
     return this.saleService.create(dto);
+  }
+
+  @Post('quick')
+  @Permissions('orders.create')
+  @HttpCode(HttpStatus.CREATED)
+  createQuickSale(@Body() dto: QuickSaleDto, @Req() req): Promise<SaleResponseDto> {
+    const user = req.user;
+
+    if (!isSuperAdmin(user) && !user.branch) {
+      throw new BadRequestException('El usuario no tiene una sucursal asignada.');
+    }
+
+    if (!isSuperAdmin(user)) {
+      dto.branchId = user.branch.id;
+    }
+
+    return this.saleService.createQuickSale(dto, user?.id);
   }
 
   @Post(':id/confirm')

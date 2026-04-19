@@ -1,10 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Sale, SaleDetail, SaleStatus, DiscountType } from '../entities';
-import { DataSource, IsNull, Like, Repository } from 'typeorm';
+import { Sale, SaleDetail, SaleStatus, DiscountType, SalePayment, PaymentStatus } from '../entities';
+import { DataSource, DeepPartial, IsNull, Like, Repository } from 'typeorm';
 import { CustomerService, DiscountCodeService } from '.';
 import { BranchService, InventoryMovementService, ProductService } from 'src/logistics/services';
-import { CreateSaleDto, PaginatedSaleResponseDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
+import { CreateSaleDto, PaginatedSaleResponseDto, QuickSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { Branch, Inventory, MovementStatus, MovementType, MovementConcept, Area } from 'src/logistics/entities';
 import { SaleGateway } from '../gateway/sale.gateway';
@@ -36,6 +36,16 @@ export class SaleService {
   ) {}
 
   async create(dto: CreateSaleDto): Promise<SaleResponseDto> {
+    if (!dto.invoiceNumber) {
+      const { nextNumber } = await this.generateNextInvoiceNumber();
+      dto.invoiceNumber = nextNumber;
+    }
+
+    if (!dto.customerId && !dto.guestCustomer) {
+      const cf = await this.customerService.getOrCreateConsumidorFinal();
+      dto.customerId = cf.id;
+    }
+
     const existingInvoice = await this.saleRepository.findOne({
       where: { invoiceNumber: dto.invoiceNumber },
       withDeleted: false,
@@ -243,6 +253,258 @@ export class SaleService {
 
       this.saleGateway.notifyNewSale(finalSale);
 
+      const nextNumber = await this.generateNextInvoiceNumber();
+      this.saleGateway.broadcastNextInvoiceNumber(nextNumber.nextNumber);
+
+      return finalSale;
+    } catch (error) {
+      await qr.rollbackTransaction();
+      throw error;
+    } finally {
+      await qr.release();
+    }
+  }
+
+  async createQuickSale(dto: QuickSaleDto, userId?: string): Promise<SaleResponseDto> {
+    if (!dto.invoiceNumber) {
+      const { nextNumber } = await this.generateNextInvoiceNumber();
+      dto.invoiceNumber = nextNumber;
+    }
+
+    if (!dto.customerId && !dto.guestCustomer) {
+      const cf = await this.customerService.getOrCreateConsumidorFinal();
+      dto.customerId = cf.id;
+    }
+
+    const existingInvoice = await this.saleRepository.findOne({
+      where: { invoiceNumber: dto.invoiceNumber },
+      withDeleted: false,
+    });
+
+    if (existingInvoice) throw new ConflictException(`La factura ${dto.invoiceNumber} ya existe`);
+
+    if (dto.customerId && dto.guestCustomer) {
+      throw new BadRequestException('No puede proporcionar customerId y guestCustomer al mismo tiempo.');
+    }
+
+    if (!dto.customerId && !dto.guestCustomer) {
+      throw new BadRequestException('Debe proporcionar customerId o guestCustomer.');
+    }
+
+    let customer: any = null;
+    if (dto.customerId) {
+      try {
+        customer = await this.customerService.findOne(dto.customerId);
+      } catch {
+        throw new BadRequestException(`El cliente con ID ${dto.customerId} no existe`);
+      }
+    }
+
+    const branch = await this.branchRepository.findOne({
+      where: { id: dto.branchId, deletedAt: IsNull() },
+    });
+
+    if (!branch) {
+      throw new BadRequestException('Sucursal no válida.');
+    }
+
+    if (!dto.details?.length) throw new BadRequestException('La venta debe tener al menos un detalle');
+
+    // 1. Stock Check
+    const stockErrors: string[] = [];
+    for (const detailDto of dto.details) {
+      const stockQuery = await this.dataSource
+        .createQueryBuilder()
+        .select(['product.id', 'product.name', 'COALESCE(SUM(inventory.stock), 0) AS current_stock'])
+        .from('products', 'product')
+        .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId })
+        .where('product.id = :productId', { productId: detailDto.productId })
+        .andWhere('product.deletedAt IS NULL')
+        .groupBy('product.id')
+        .getRawOne();
+
+      if (!stockQuery) {
+        stockErrors.push(`Producto con ID ${detailDto.productId} no encontrado`);
+        continue;
+      }
+
+      const currentStock = Number(stockQuery.current_stock);
+      if (currentStock < detailDto.quantity) {
+        stockErrors.push(`Producto "${stockQuery.product_name}" - Stock insuficiente: solicitado ${detailDto.quantity}, disponible ${currentStock}`);
+      }
+    }
+
+    if (stockErrors.length > 0) {
+      throw new BadRequestException({ message: 'Error de stock en los productos', errors: stockErrors });
+    }
+
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+
+    try {
+      // 2. Create Sale
+      const sale = qr.manager.create(Sale, {
+        invoiceNumber: dto.invoiceNumber,
+        date: dto.date ? new Date(dto.date) : new Date(),
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        status: dto.finalStatus || SaleStatus.DELIVERED,
+        notes: dto.notes || null,
+        customer: dto.customerId ? { id: dto.customerId } : undefined,
+        guestCustomer: dto.guestCustomer ?? undefined,
+        branch: { id: dto.branchId },
+        discountCode: dto.discountCodeId ? { id: dto.discountCodeId } : null,
+        applyTax: dto.applyTax ?? true,
+        subtotal: 0,
+        taxAmount: 0,
+        discountAmount: 0,
+        total: 0,
+        paidAmount: 0,
+        pendingAmount: 0,
+      } as DeepPartial<Sale>);
+
+      const savedSale = await qr.manager.save(sale);
+
+      // 3. Create Details and calculate totals
+      let subtotal = 0;
+      let taxAmount = 0;
+      let lineDiscounts = 0;
+
+      for (const detailDto of dto.details) {
+        const product = await this.productService.findOne(detailDto.productId);
+        const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
+        let lineDiscount = 0;
+        let discountPct = detailDto.discount || 0;
+
+        if (detailDto.discountType === DiscountType.FIXED_AMOUNT) {
+          lineDiscount = detailDto.discountAmount || 0;
+          discountPct = lineSubtotal > 0 ? (lineDiscount / lineSubtotal) * 100 : 0;
+        } else {
+          lineDiscount = (lineSubtotal * discountPct) / 100;
+        }
+
+        const lineAfterDiscount = lineSubtotal - lineDiscount;
+        const lineTax = sale.applyTax ? (lineAfterDiscount * (detailDto.taxPercentage ?? 12)) / 100 : 0;
+        const lineTotal = lineAfterDiscount + lineTax;
+
+        const detail = qr.manager.create(SaleDetail, {
+          sale: savedSale,
+          product: { id: detailDto.productId },
+          quantity: detailDto.quantity,
+          unitPrice: detailDto.unitPrice,
+          discount: discountPct,
+          discountAmount: lineDiscount,
+          discountType: detailDto.discountType || DiscountType.PERCENTAGE,
+          taxPercentage: sale.applyTax ? (detailDto.taxPercentage ?? 12) : 0,
+          taxAmount: lineTax,
+          lineTotal,
+          currentArea: product.area ? (product.area as any) : null,
+          preparationStatus: PreparationStatus.COMPLETED,
+          originalPrice: detailDto.originalPrice || product.price,
+          notes: detailDto.notes,
+        });
+
+        await qr.manager.save(detail);
+
+        // 4. Inventory Movements (Immediately)
+        await this.inventoryMovementService.create(
+          {
+            productId: detailDto.productId,
+            branchId: dto.branchId,
+            quantity: detailDto.quantity,
+            type: MovementType.OUT,
+            notes: `Venta Rápida ${sale.invoiceNumber}`,
+            unitCost: product.cost,
+            totalCost: detailDto.quantity * product.cost,
+            status: MovementStatus.COMPLETED,
+            referenceId: savedSale.id,
+            referenceNumber: sale.invoiceNumber,
+            concept: MovementConcept.SALE,
+          },
+          userId,
+          true,
+        );
+
+        subtotal += lineSubtotal;
+        lineDiscounts += lineDiscount;
+        taxAmount += lineTax;
+      }
+
+      // 5. Global Discounts
+      let manualDiscountsAmount = 0;
+      if (dto.discounts?.length) {
+        for (const disDto of dto.discounts) {
+          let amount = disDto.type === 'percent' ? subtotal * (disDto.value / 100) : disDto.value;
+          manualDiscountsAmount += amount;
+          await qr.manager.save(qr.manager.create(SaleDiscount, {
+            sale: savedSale,
+            type: disDto.type,
+            value: disDto.value,
+            amountApplied: amount,
+            reason: disDto.reason || null,
+          }));
+        }
+      }
+
+      let discountCodeAmount = 0;
+      if (dto.discountCodeId) {
+        const discountCode = await this.discountCodeService.findOne(dto.discountCodeId);
+        const validation = await this.discountCodeService.validateDiscountCode(discountCode.code, dto.customerId, undefined, subtotal);
+        if (validation.isValid) discountCodeAmount = validation.discountAmount;
+      }
+
+      const globalDiscounts = manualDiscountsAmount + discountCodeAmount;
+      const totalDiscounts = lineDiscounts + globalDiscounts;
+      const taxableBase = subtotal - lineDiscounts;
+      const finalTaxAmount = taxableBase > 0 ? taxAmount * ((taxableBase - globalDiscounts) / taxableBase) : 0;
+      const total = taxableBase - globalDiscounts + finalTaxAmount;
+
+      // 6. Payments
+      let paidAmount = 0;
+      if (dto.payments?.length) {
+        for (const payDto of dto.payments) {
+          const payment = qr.manager.create(SalePayment, {
+            sale: savedSale,
+            paymentMethod: { id: payDto.paymentMethodId },
+            amount: payDto.amount,
+            date: payDto.date ? new Date(payDto.date) : new Date(),
+            referenceNumber: payDto.referenceNumber,
+            bankAccount: payDto.bankAccountId ? { id: payDto.bankAccountId } : null,
+            manualBankAccount: payDto.manualBankAccount,
+            status: payDto.status || PaymentStatus.COMPLETED,
+            isDownPayment: false,
+            notes: payDto.notes,
+          });
+          await qr.manager.save(payment);
+          paidAmount += Number(payDto.amount);
+        }
+      }
+
+      const pendingAmount = total - paidAmount;
+
+      await qr.manager.update(Sale, savedSale.id, {
+        subtotal,
+        taxAmount: finalTaxAmount,
+        discountAmount: totalDiscounts,
+        total,
+        paidAmount,
+        pendingAmount,
+      });
+
+      // 7. Post-process
+      if (dto.customerId) {
+        await this.customerService.updatePurchaseStats(dto.customerId, total);
+      }
+
+      if (dto.discountCodeId) {
+        const discountCode = await this.discountCodeService.findOne(dto.discountCodeId);
+        await this.discountCodeService.applyDiscountCode(discountCode.code, savedSale.id);
+      }
+
+      await qr.commitTransaction();
+
+      const finalSale = await this.findOne(savedSale.id);
+      this.saleGateway.notifyNewSale(finalSale);
       const nextNumber = await this.generateNextInvoiceNumber();
       this.saleGateway.broadcastNextInvoiceNumber(nextNumber.nextNumber);
 

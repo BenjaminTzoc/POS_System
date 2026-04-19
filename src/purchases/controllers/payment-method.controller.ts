@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { PaymentMethodService } from '../services/payment-method.service';
 import { CreatePaymentMethodDto, PaymentMethodResponseDto, UpdatePaymentMethodDto } from '../dto';
 import { Public } from 'src/auth/decorators';
@@ -16,8 +16,8 @@ export class PaymentMethodController {
 
   @Get()
   @Public()
-  findAll(): Promise<PaymentMethodResponseDto[]> {
-    return this.paymentMethodService.findAll();
+  findAll(@Query('includeDeleted') includeDeleted: string): Promise<PaymentMethodResponseDto[]> {
+    return this.paymentMethodService.findAll(includeDeleted === 'true');
   }
 
   @Get('code/:code')

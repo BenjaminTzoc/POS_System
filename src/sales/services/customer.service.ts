@@ -14,6 +14,31 @@ export class CustomerService {
     private readonly customerCategoryService: CustomerCategoryService,
   ) {}
 
+  async getOrCreateConsumidorFinal(): Promise<Customer> {
+    let customer = await this.customerRepository.findOne({
+      where: { nit: 'C/F' },
+      withDeleted: false,
+    });
+
+    if (!customer) {
+      const categories = await this.customerCategoryService.findAll();
+      const defaultCategory = categories.length > 0 ? categories[0] : null;
+
+      customer = this.customerRepository.create({
+        name: 'Consumidor Final',
+        nit: 'C/F',
+        address: 'Ciudad',
+        loyaltyPoints: 0,
+        totalPurchases: 0,
+        creditLimit: defaultCategory?.defaultCreditLimit || 0,
+        category: defaultCategory ? ({ id: defaultCategory.id } as any) : null,
+      });
+      customer = await this.customerRepository.save(customer);
+    }
+
+    return customer;
+  }
+
   async create(dto: CreateCustomerDto): Promise<CustomerResponseDto> {
     const existingNit = await this.customerRepository.findOne({
       where: { nit: dto.nit },
