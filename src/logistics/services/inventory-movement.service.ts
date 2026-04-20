@@ -18,7 +18,9 @@ export class InventoryMovementService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async create(dto: CreateInventoryMovementDto, userId?: string, isInternal: boolean = false): Promise<InventoryMovementResponseDto> {
+  async create(dto: CreateInventoryMovementDto, userId?: string, isInternal: boolean = false, manager?: any): Promise<InventoryMovementResponseDto> {
+    const repo = manager ? manager.getRepository(InventoryMovement) : this.movementRepository;
+    const invRepo = manager ? manager.getRepository(Inventory) : this.dataSource.getRepository(Inventory);
     if (!isInternal && (dto.concept === MovementConcept.SALE || dto.concept === MovementConcept.PURCHASE || dto.concept === MovementConcept.TRANSFER)) {
       throw new BadRequestException('Los movimientos de venta, compra y transferencia no pueden crearse manualmente. Utilice los módulos correspondientes.');
     }
@@ -85,7 +87,7 @@ export class InventoryMovementService {
     }
 
     const quantity = Math.abs(dto.quantity);
-    const movement = this.movementRepository.create({
+    const movement = repo.create({
       product: product,
       branch: branch,
       inventory: inventory ? inventory : null,
@@ -104,10 +106,10 @@ export class InventoryMovementService {
       totalCost: dto.totalCost || (dto.unitCost ? dto.unitCost * quantity : product.cost * quantity),
     });
 
-    const savedMovement = await this.movementRepository.save(movement);
+    const savedMovement = await repo.save(movement);
 
     if (savedMovement.status === MovementStatus.COMPLETED) {
-      await this.updateInventory(savedMovement);
+      await this.updateInventory(savedMovement, manager);
     }
 
     return this.findOne(savedMovement.id);
@@ -336,13 +338,30 @@ export class InventoryMovementService {
     };
   }
 
-  private async updateInventory(movement: InventoryMovement): Promise<void> {
+  private async updateInventory(movement: InventoryMovement, manager?: any): Promise<void> {
+    if (manager) {
+      await this.performInventoryUpdate(movement, manager);
+      return;
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      let inventory = await queryRunner.manager.findOne(Inventory, {
+      await this.performInventoryUpdate(movement, queryRunner.manager);
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  private async performInventoryUpdate(movement: InventoryMovement, manager: any): Promise<void> {
+    try {
+      let inventory = await manager.findOne(Inventory, {
         where: {
           product: { id: movement.product.id },
           branch: { id: movement.branch.id },
@@ -350,7 +369,7 @@ export class InventoryMovementService {
       });
 
       if (!inventory) {
-        inventory = queryRunner.manager.create(Inventory, {
+        inventory = manager.create(Inventory, {
           product: { id: movement.product.id },
           branch: { id: movement.branch.id },
           stock: 0,
@@ -377,20 +396,15 @@ export class InventoryMovementService {
       }
 
       inventory.lastMovementDate = new Date();
-      const updatedInventory = await queryRunner.manager.save(inventory);
+      await manager.save(inventory);
 
-      await queryRunner.manager.update(InventoryMovement, movement.id, {
+      await manager.update(InventoryMovement, movement.id, {
         previousStock,
-        newStock: updatedInventory.stock,
+        newStock: inventory.stock,
         completedAt: new Date(),
       });
-
-      await queryRunner.commitTransaction();
     } catch (error) {
-      await queryRunner.rollbackTransaction();
       throw error;
-    } finally {
-      await queryRunner.release();
     }
   }
 

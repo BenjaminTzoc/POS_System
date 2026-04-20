@@ -432,6 +432,7 @@ export class SaleService {
           },
           userId,
           true,
+          qr.manager,
         );
 
         subtotal += lineSubtotal;
@@ -704,12 +705,12 @@ export class SaleService {
             unitCost: detail.product.cost,
             totalCost: detail.quantity * detail.product.cost,
             status: MovementStatus.COMPLETED,
-            referenceId: sale.id,
             referenceNumber: sale.invoiceNumber,
             concept: MovementConcept.SALE,
           },
           userId,
           true,
+          queryRunner.manager,
         );
       }
 
