@@ -690,7 +690,9 @@ export class ProductService {
       dto.stock = Number(p.stock);
       dto.unitName = p.unit_name;
       dto.unitAbbreviation = p.unit_abbreviation;
-      dto.allowsDecimals = p.unit_allowsDecimals === 1 || p.unit_allowsDecimals === true;
+      // Probamos ambos formatos de nombre por si acaso (camelCase y snake_case)
+      const allowsDec = p.unit_allowsDecimals ?? p.unit_allows_decimals;
+      dto.allowsDecimals = allowsDec === 1 || allowsDec === true || allowsDec === '1';
       return dto;
     });
   }
