@@ -187,6 +187,9 @@ export class BranchProductResponseDto {
   unitName: string | null;
 
   @Expose()
+  allowsDecimals: boolean;
+
+  @Expose()
   price: number;
 }
 

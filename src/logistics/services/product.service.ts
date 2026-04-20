@@ -676,7 +676,7 @@ export class ProductService {
   }
 
   async getBranchCatalog(branchId: string): Promise<BranchProductResponseDto[]> {
-    const query = this.productRepository.createQueryBuilder('product').leftJoinAndSelect('product.unit', 'unit').innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).where('product.deletedAt IS NULL').andWhere('product.isActive = :isActive', { isActive: true }).select(['product.id', 'product.name', 'product.sku', 'product.imageUrl', 'product.price', 'unit.name', 'unit.abbreviation']).addSelect('inventory.stock', 'stock').orderBy('product.name', 'ASC');
+    const query = this.productRepository.createQueryBuilder('product').leftJoinAndSelect('product.unit', 'unit').innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).where('product.deletedAt IS NULL').andWhere('product.isActive = :isActive', { isActive: true }).select(['product.id', 'product.name', 'product.sku', 'product.imageUrl', 'product.price', 'unit.name', 'unit.abbreviation', 'unit.allowsDecimals']).addSelect('inventory.stock', 'stock').orderBy('product.name', 'ASC');
 
     const rawProducts = await query.getRawMany();
 
@@ -690,6 +690,7 @@ export class ProductService {
       dto.stock = Number(p.stock);
       dto.unitName = p.unit_name;
       dto.unitAbbreviation = p.unit_abbreviation;
+      dto.allowsDecimals = p.unit_allowsDecimals === 1 || p.unit_allowsDecimals === true;
       return dto;
     });
   }
