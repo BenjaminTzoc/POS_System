@@ -46,8 +46,9 @@ export class SaleController {
       throw new BadRequestException('El usuario no tiene una sucursal asignada.');
     }
 
-    if (!isSuperAdmin(user)) {
-      dto.branchId = user.branch.id;
+    // Si no viene branchId en el DTO, intentamos usar el del usuario
+    if (!dto.branchId && !isSuperAdmin(user)) {
+      dto.branchId = user.branch?.id;
     }
 
     return this.saleService.createQuickSale(dto, user?.id);
