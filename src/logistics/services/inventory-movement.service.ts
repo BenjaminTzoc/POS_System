@@ -112,7 +112,24 @@ export class InventoryMovementService {
       await this.updateInventory(savedMovement, manager);
     }
 
+    if (manager) {
+      return this.findOneInTransaction(savedMovement.id, manager);
+    }
+
     return this.findOne(savedMovement.id);
+  }
+
+  private async findOneInTransaction(id: string, manager: any): Promise<InventoryMovementResponseDto> {
+    const movement = await manager.findOne(InventoryMovement, {
+      where: { id, deletedAt: IsNull() },
+      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+    });
+
+    if (!movement) {
+      throw new NotFoundException(`Movimiento con ID ${id} no encontrado en la transacción`);
+    }
+
+    return plainToInstance(InventoryMovementResponseDto, movement);
   }
 
   async findAll(): Promise<InventoryMovementResponseDto[]> {
