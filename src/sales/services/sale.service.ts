@@ -315,12 +315,16 @@ export class SaleService {
     for (const detailDto of dto.details) {
       const stockQuery = await this.dataSource
         .createQueryBuilder()
-        .select(['product.id', 'product.name', 'COALESCE(SUM(inventory.stock), 0) AS current_stock'])
+        .select('product.name', 'name')
+        .addSelect('product.manageStock', 'manageStock')
+        .addSelect('COALESCE(SUM(inventory.stock), 0)', 'totalStock')
         .from('products', 'product')
         .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId })
         .where('product.id = :productId', { productId: detailDto.productId })
         .andWhere('product.deletedAt IS NULL')
         .groupBy('product.id')
+        .addGroupBy('product.name')
+        .addGroupBy('product.manageStock')
         .getRawOne();
 
       if (!stockQuery) {
@@ -328,9 +332,14 @@ export class SaleService {
         continue;
       }
 
-      const currentStock = Number(stockQuery.current_stock);
+      // Si el producto no gestiona stock, saltamos la validación
+      const manageStock = stockQuery.manageStock === true || stockQuery.manageStock === 1 || stockQuery.product_manageStock === true || stockQuery.product_manageStock === 1;
+      
+      if (!manageStock) continue;
+
+      const currentStock = Number(stockQuery.totalStock || 0);
       if (currentStock < detailDto.quantity) {
-        stockErrors.push(`Producto "${stockQuery.product_name}" - Stock insuficiente: solicitado ${detailDto.quantity}, disponible ${currentStock}`);
+        stockErrors.push(`Producto "${stockQuery.name}" - Stock insuficiente: solicitado ${detailDto.quantity}, disponible ${currentStock}`);
       }
     }
 
