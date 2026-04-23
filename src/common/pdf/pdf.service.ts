@@ -114,6 +114,7 @@ export class PdfService {
 
       // --- Header ---
       doc.fillColor(primaryColor).fontSize(24).text('COTIZACIÓN', { align: 'center' });
+      doc.fontSize(14).text(quotation.branch?.name || '', { align: 'center' });
       doc.fontSize(12).text(quotation.correlative, { align: 'center' });
       doc.fontSize(10).text(`Fecha: ${new Date(quotation.createdAt).toLocaleDateString()}`, { align: 'center' });
       doc.moveDown(2);
@@ -159,7 +160,7 @@ export class PdfService {
         const unitPriceAdjusted = (Number(item.lineTotal) - Number(item.taxAmount)) / Number(item.quantity);
 
         doc.text(item.product?.name || 'Producto', 60, itemY, { width: 200 });
-        doc.text(Number(item.quantity).toFixed(0), 250, itemY, { width: 100, align: 'center' });
+        doc.text(Number(item.quantity).toFixed(2), 250, itemY, { width: 100, align: 'center' });
         doc.text(`Q${unitPriceAdjusted.toFixed(2)}`, 350, itemY, { width: 100, align: 'center' });
         doc.text(`Q${(unitPriceAdjusted * Number(item.quantity)).toFixed(2)}`, 450, itemY, { width: 100, align: 'center' });
         doc.moveDown();
@@ -174,7 +175,11 @@ export class PdfService {
       const rightColX = 350;
 
       const summaryY = doc.y;
-      doc.fontSize(9).text('Esta cotización tiene una validez de 30 días.', leftColX, summaryY, { width: 250 });
+      
+      const diffTime = Math.abs(quotation.validUntil.getTime() - quotation.createdAt.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      doc.fontSize(9).text(`Esta cotización tiene una validez de ${diffDays} días (Vence el ${new Date(quotation.validUntil).toLocaleDateString()}).`, leftColX, summaryY, { width: 250 });
       doc.text('Después de este tiempo deberá solicitar una nueva cotización', leftColX, doc.y);
       doc.text('y estará sujeta a variación de precios.', leftColX, doc.y);
 
@@ -192,11 +197,16 @@ export class PdfService {
       doc.text(`Q${Number(quotation.total).toFixed(2)}`, 450, doc.y - 12, { align: 'right' });
 
       // --- Footer / Banking ---
+      const branchName = quotation.branch?.name || 'Nuestra Empresa';
+      const branchAddress = quotation.branch?.address || '';
+      const branchPhone = quotation.branch?.phone || '';
+      const branchEmail = quotation.branch?.email || '';
+
       doc.moveDown(4);
-      doc.fontSize(9).text('Para abonar a esta cotización o pagar al valor total de la misma.', { align: 'center' });
-      doc.text('Realice su pago a la cuenta #1234567 a nombre de Mi Empresa S.A.', { align: 'center' });
+      doc.fontSize(9).text(`Para abonar a esta cotización o pagar el valor total de la misma,`, { align: 'center' });
+      doc.text(`comuníquese con ${branchName}.`, { align: 'center' });
       doc.moveDown();
-      doc.text('Dirección: Calle 1, Ciudad | Tel: 2222-3333 | Email: ventas@empresa.com', { align: 'center' });
+      doc.text(`Dirección: ${branchAddress} | Tel: ${branchPhone} | Email: ${branchEmail}`, { align: 'center' });
 
       doc.end();
     });
