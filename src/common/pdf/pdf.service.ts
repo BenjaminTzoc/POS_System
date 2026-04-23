@@ -177,7 +177,7 @@ export class PdfService {
       const summaryY = doc.y;
       
       const diffTime = Math.abs(quotation.validUntil.getTime() - quotation.createdAt.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
       
       doc.fontSize(9).text(`Esta cotización tiene una validez de ${diffDays} días (Vence el ${new Date(quotation.validUntil).toLocaleDateString()}).`, leftColX, summaryY, { width: 250 });
       doc.text('Después de este tiempo deberá solicitar una nueva cotización', leftColX, doc.y);
