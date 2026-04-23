@@ -4,5 +4,7 @@ export { DiscountCode, DiscountScope, DiscountType } from './discount-code.entit
 export { SaleDetail } from './sale-detail.entity';
 export { SalePayment, PaymentStatus } from './sale-payment.entity';
 export { Sale, SaleStatus } from './sale.entity';
+export { SaleDiscount, SaleDiscountType } from './sale-discount.entity';
 export { Quotation, QuotationStatus } from './quotation.entity';
 export { QuotationItem } from './quotation-item.entity';
+export { QuotationDiscount, QuotationAdjustmentType, QuotationValueType } from './quotation-discount.entity';

@@ -1,6 +1,8 @@
-import { IsArray, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateNested } from 'class-validator';
 import { Type, Expose } from 'class-transformer';
 import { QuotationStatus } from '../entities/quotation.entity';
+import { DiscountType } from '../entities/discount-code.entity';
+import { QuotationAdjustmentType, QuotationValueType } from '../entities/quotation-discount.entity';
 
 export class CreateQuotationItemDto {
   @IsUUID()
@@ -13,6 +15,56 @@ export class CreateQuotationItemDto {
   @IsNumber()
   @Min(0)
   unitPrice: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  discount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  discountAmount?: number;
+
+  @IsOptional()
+  @IsEnum(DiscountType)
+  discountType?: DiscountType;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  taxPercentage?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  originalPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  lineTotal?: number;
+}
+
+export class CreateQuotationAdjustmentDto {
+  @IsEnum(QuotationAdjustmentType)
+  adjustmentType: QuotationAdjustmentType;
+
+  @IsEnum(QuotationValueType)
+  valueType: QuotationValueType;
+
+  @IsNumber()
+  @Min(0)
+  value: number;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
 
 export class CreateQuotationDto {
@@ -27,6 +79,10 @@ export class CreateQuotationDto {
   @IsOptional()
   validityDays?: number = 15;
 
+  @IsBoolean()
+  @IsOptional()
+  applyTax?: boolean = true;
+
   @IsString()
   @IsOptional()
   notes?: string;
@@ -35,6 +91,12 @@ export class CreateQuotationDto {
   @ValidateNested({ each: true })
   @Type(() => CreateQuotationItemDto)
   items: CreateQuotationItemDto[];
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateQuotationAdjustmentDto)
+  adjustments?: CreateQuotationAdjustmentDto[];
 
   @IsOptional()
   guestCustomer?: {
@@ -74,7 +136,48 @@ export class QuotationItemResponseDto {
   unitPrice: number;
 
   @Expose()
+  discount: number;
+
+  @Expose()
+  discountAmount: number;
+
+  @Expose()
+  discountType: DiscountType;
+
+  @Expose()
+  taxPercentage: number;
+
+  @Expose()
+  taxAmount: number;
+
+  @Expose()
+  lineTotal: number;
+
+  @Expose()
   subtotal: number;
+
+  @Expose()
+  notes: string;
+}
+
+export class QuotationAdjustmentResponseDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  adjustmentType: QuotationAdjustmentType;
+
+  @Expose()
+  valueType: QuotationValueType;
+
+  @Expose()
+  value: number;
+
+  @Expose()
+  amountApplied: number;
+
+  @Expose()
+  reason: string;
 }
 
 export class QuotationResponseDto {
@@ -94,10 +197,16 @@ export class QuotationResponseDto {
   notes: string;
 
   @Expose()
+  applyTax: boolean;
+
+  @Expose()
   subtotal: number;
 
   @Expose()
   taxAmount: number;
+
+  @Expose()
+  discountAmount: number;
 
   @Expose()
   total: number;
@@ -129,4 +238,8 @@ export class QuotationResponseDto {
   @Expose()
   @Type(() => QuotationItemResponseDto)
   items: QuotationItemResponseDto[];
+
+  @Expose()
+  @Type(() => QuotationAdjustmentResponseDto)
+  adjustments: QuotationAdjustmentResponseDto[];
 }

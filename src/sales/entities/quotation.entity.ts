@@ -4,6 +4,7 @@ import { Customer, Sale } from '.';
 import { Branch } from 'src/logistics/entities';
 import { QuotationItem } from './quotation-item.entity';
 import { User } from 'src/auth/entities/user.entity';
+import { QuotationDiscount } from './quotation-discount.entity';
 
 export enum QuotationStatus {
   PENDING = 'PENDING',
@@ -43,6 +44,13 @@ export class Quotation extends BaseEntity {
   subtotal: number;
 
   @Column({
+    name: 'apply_tax',
+    type: 'boolean',
+    default: true,
+  })
+  applyTax: boolean;
+
+  @Column({
     name: 'tax_amount',
     type: 'decimal',
     precision: 12,
@@ -50,6 +58,15 @@ export class Quotation extends BaseEntity {
     default: 0,
   })
   taxAmount: number;
+
+  @Column({
+    name: 'discount_amount',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  discountAmount: number;
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   total: number;
@@ -68,6 +85,9 @@ export class Quotation extends BaseEntity {
 
   @OneToMany(() => QuotationItem, (item) => item.quotation, { cascade: true })
   items: QuotationItem[];
+
+  @OneToMany(() => QuotationDiscount, (discount) => discount.quotation, { cascade: true })
+  discounts: QuotationDiscount[];
 
   @OneToOne(() => Sale, { nullable: true })
   @JoinColumn({ name: 'sale_id' })

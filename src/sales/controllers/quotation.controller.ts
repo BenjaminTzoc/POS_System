@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { QuotationService } from '../services/quotation.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User as UserDecorator } from 'src/common/decorators/user.decorator';
 import { CreateQuotationDto, QuotationResponseDto, UpdateQuotationStatusDto } from '../dto';
 import { QuotationStatus } from '../entities';
+import type { Response } from 'express';
 
 @Controller('quotations')
 @UseGuards(JwtAuthGuard)
@@ -28,6 +29,23 @@ export class QuotationController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<QuotationResponseDto> {
     return this.quotationService.findOne(id);
+  }
+
+  @Get(':id/pdf')
+  async getPdf(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+    const buffer = await this.quotationService.generatePdf(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=cotizacion-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
+
+  @Post(':id/send-email')
+  async sendEmail(@Param('id', ParseUUIDPipe) id: string, @Body('email') email: string): Promise<{ message: string }> {
+    await this.quotationService.sendQuotationEmail(id, email);
+    return { message: 'Correo enviado exitosamente' };
   }
 
   @Patch(':id/status')
