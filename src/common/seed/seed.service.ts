@@ -132,7 +132,7 @@ export class SeedService {
       await queryRunner.manager.save(adminUser);
 
       // 4. Seeding dinámico de permisos y roles basado en el menú
-      await this.authService.seedDefaultData();
+      await this.authService.seedDefaultData(queryRunner.manager);
 
       await queryRunner.commitTransaction();
       this.logger.log('Seed completado con éxito.');

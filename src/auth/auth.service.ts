@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository, EntityManager, DataSource } from 'typeorm';
 import { Permission, Role, User } from './entities';
 import { CreatePermissionDto, CreateRoleDto, CreateUserDto, PermissionResponseDto, RoleResponseDto, UpdatePermissionDto, UpdateRoleDto, UpdateUserDto, UserResponseDto } from './dto';
 import { plainToInstance } from 'class-transformer';
@@ -24,9 +24,17 @@ export class AuthService {
 
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
-  async seedDefaultData(): Promise<{ message: string }> {
+  async seedDefaultData(manager?: EntityManager): Promise<{ message: string }> {
+    const repo = (entity: any) => manager ? manager.getRepository(entity) : this.dataSource.getRepository(entity);
+    // Actually, simple way:
+    const permissionRepo = manager ? manager.getRepository(Permission) : this.permissionRepository;
+    const roleRepo = manager ? manager.getRepository(Role) : this.roleRepository;
+    const userRepo = manager ? manager.getRepository(User) : this.userRepository;
+    const branchRepo = manager ? manager.getRepository(Branch) : this.branchRepository;
+
     // 1. Create Permissions from menu
     const permissionNames = new Set<string>();
     const extractPermissions = (items: any[]) => {
@@ -45,12 +53,12 @@ export class AuthService {
     permissionNames.add('branches.manage');
 
     for (const name of permissionNames) {
-      const exists = await this.permissionRepository.findOne({ where: { name } });
+      const exists = await permissionRepo.findOne({ where: { name } });
       if (!exists) {
         const [module, ...actionParts] = name.split('.');
         const action = actionParts.join('.') || 'manage';
         
-        await this.permissionRepository.save(this.permissionRepository.create({ 
+        await permissionRepo.save(permissionRepo.create({ 
           name, 
           description: `Permiso para ${name}`,
           module: module || 'general',
@@ -61,10 +69,10 @@ export class AuthService {
 
     // 2. Create Roles
     const adminRoleName = 'ADMIN_GLOBAL';
-    let adminRole = await this.roleRepository.findOne({ where: { name: adminRoleName } });
+    let adminRole = await roleRepo.findOne({ where: { name: adminRoleName } });
     if (!adminRole) {
-      const allPermissions = await this.permissionRepository.find();
-      adminRole = await this.roleRepository.save(this.roleRepository.create({
+      const allPermissions = await permissionRepo.find();
+      adminRole = await roleRepo.save(roleRepo.create({
         name: adminRoleName,
         description: 'Administrador con acceso total',
         isSuperAdmin: true,
@@ -73,16 +81,16 @@ export class AuthService {
     }
 
     const clerkRoleName = 'CAJERO';
-    let clerkRole = await this.roleRepository.findOne({ where: { name: clerkRoleName } });
+    let clerkRole = await roleRepo.findOne({ where: { name: clerkRoleName } });
     if (!clerkRole) {
-      const clerkPermissions = await this.permissionRepository.find({
+      const clerkPermissions = await permissionRepo.find({
         where: {
           name: In([
             'sales.view', 'sales.create', 'sales.pos', 'customers.view', 'customers.manage', 'cash.view', 'quotations.view'
           ])
         }
       });
-      clerkRole = await this.roleRepository.save(this.roleRepository.create({
+      clerkRole = await roleRepo.save(roleRepo.create({
         name: clerkRoleName,
         description: 'Vendedor / Cajero de sucursal',
         isSuperAdmin: false,
@@ -92,25 +100,25 @@ export class AuthService {
 
     // 3. Create Users
     const adminEmail = 'admin@pos.com';
-    const existsAdmin = await this.userRepository.findOne({ where: { email: adminEmail } });
+    const existsAdmin = await userRepo.findOne({ where: { email: adminEmail } });
     if (!existsAdmin) {
       const hashedPassword = await bcrypt.hash('admin123', 10);
-      await this.userRepository.save(this.userRepository.create({
+      await userRepo.save(userRepo.create({
         name: 'Administrador Global',
         email: adminEmail,
         password: hashedPassword,
-        roles: [adminRole],
+        roles: [adminRole!],
         emailVerified: true,
       }));
     }
 
     const clerkEmail = 'caja@pos.com';
-    const existsClerk = await this.userRepository.findOne({ where: { email: clerkEmail } });
+    const existsClerk = await userRepo.findOne({ where: { email: clerkEmail } });
     if (!existsClerk) {
       const hashedPassword = await bcrypt.hash('caja123', 10);
-      const branch = await this.branchRepository.findOne({ where: { deletedAt: IsNull() } });
+      const branch = await branchRepo.findOne({ where: { deletedAt: IsNull() } });
       
-      await this.userRepository.save(this.userRepository.create({
+      await userRepo.save(userRepo.create({
         name: 'Cajero de Prueba',
         email: clerkEmail,
         password: hashedPassword,
