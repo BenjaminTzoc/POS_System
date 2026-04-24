@@ -86,7 +86,14 @@ export class AuthService {
       const clerkPermissions = await permissionRepo.find({
         where: {
           name: In([
-            'sales.view', 'sales.create', 'sales.pos', 'customers.view', 'customers.manage', 'cash.view', 'quotations.view'
+            'sales.view',      // Ver órdenes de venta
+            'sales.create',    // Venta rápida / Crear orden
+            'sales.pos',       // POS de escritorio
+            'customers.view',  // Buscar clientes
+            'customers.create',// Crear clientes nuevos
+            'cash.view',       // Ver arqueos propios
+            'quotations.view', // Ver/Crear cotizaciones
+            'quotations.create'
           ])
         }
       });
