@@ -47,7 +47,15 @@ export class AuthService {
     for (const name of permissionNames) {
       const exists = await this.permissionRepository.findOne({ where: { name } });
       if (!exists) {
-        await this.permissionRepository.save(this.permissionRepository.create({ name, description: `Permiso para ${name}` }));
+        const [module, ...actionParts] = name.split('.');
+        const action = actionParts.join('.') || 'manage';
+        
+        await this.permissionRepository.save(this.permissionRepository.create({ 
+          name, 
+          description: `Permiso para ${name}`,
+          module: module || 'general',
+          action: action
+        }));
       }
     }
 

@@ -3,12 +3,16 @@ import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, Role, Permission } from '../../auth/entities';
 import { Branch } from '../../logistics/entities';
+import { AuthService } from 'src/auth/auth.service';
 
 @Injectable()
 export class SeedService {
   private readonly logger = new Logger(SeedService.name);
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly authService: AuthService,
+  ) {}
 
   async resetAndSeed() {
     this.logger.log('Iniciando reseteo de base de datos...');
@@ -39,6 +43,7 @@ export class SeedService {
       'sale_discounts',
       'sales',
       'quotation_items',
+      'quotation_discounts',
       'quotations',
       'discount_codes',
       'customer_categories',
@@ -125,6 +130,9 @@ export class SeedService {
         emailVerified: true,
       });
       await queryRunner.manager.save(adminUser);
+
+      // 4. Seeding dinámico de permisos y roles basado en el menú
+      await this.authService.seedDefaultData();
 
       await queryRunner.commitTransaction();
       this.logger.log('Seed completado con éxito.');
