@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import { AuthService } from '../auth.service';
 import { CreateUserDto, UpdateUserDto, UserResponseDto } from '../dto';
 import { Permissions, Public } from '../decorators';
+import { User as UserDecorator } from 'src/common/decorators/user.decorator';
 import { User } from '../entities';
 
 @Controller('users')
@@ -60,5 +61,16 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   login(@Body('email') email: string, @Body('password') password: string): Promise<{ user?: UserResponseDto; accessToken: string }> {
     return this.authService.validateUser(email, password);
+  }
+
+  @Public()
+  @Post('seed')
+  seed() {
+    return this.authService.seedDefaultData();
+  }
+
+  @Get('profile/menu')
+  getMenu(@UserDecorator() user: any) {
+    return this.authService.getDynamicMenu(user);
   }
 }

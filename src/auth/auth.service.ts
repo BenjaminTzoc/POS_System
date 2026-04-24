@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Branch } from 'src/logistics/entities';
+import { MENU_ITEMS, RECURRENT_MENU } from 'src/auth/constants/menu.constants';
 
 @Injectable()
 export class AuthService {
@@ -24,6 +25,136 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
+
+  async seedDefaultData(): Promise<{ message: string }> {
+    // 1. Create Permissions from menu
+    const permissionNames = new Set<string>();
+    const extractPermissions = (items: any[]) => {
+      items.forEach(item => {
+        if (item.permission) permissionNames.add(item.permission);
+        if (item.children) extractPermissions(item.children);
+      });
+    };
+    
+    extractPermissions(MENU_ITEMS);
+    extractPermissions(RECURRENT_MENU);
+    
+    // Add some extra common permissions
+    permissionNames.add('users.manage');
+    permissionNames.add('roles.manage');
+    permissionNames.add('branches.manage');
+
+    for (const name of permissionNames) {
+      const exists = await this.permissionRepository.findOne({ where: { name } });
+      if (!exists) {
+        await this.permissionRepository.save(this.permissionRepository.create({ name, description: `Permiso para ${name}` }));
+      }
+    }
+
+    // 2. Create Roles
+    const adminRoleName = 'ADMIN_GLOBAL';
+    let adminRole = await this.roleRepository.findOne({ where: { name: adminRoleName } });
+    if (!adminRole) {
+      const allPermissions = await this.permissionRepository.find();
+      adminRole = await this.roleRepository.save(this.roleRepository.create({
+        name: adminRoleName,
+        description: 'Administrador con acceso total',
+        isSuperAdmin: true,
+        permissions: allPermissions,
+      }));
+    }
+
+    const clerkRoleName = 'CAJERO';
+    let clerkRole = await this.roleRepository.findOne({ where: { name: clerkRoleName } });
+    if (!clerkRole) {
+      const clerkPermissions = await this.permissionRepository.find({
+        where: {
+          name: In([
+            'sales.view', 'sales.create', 'sales.pos', 'customers.view', 'customers.manage', 'cash.view', 'quotations.view'
+          ])
+        }
+      });
+      clerkRole = await this.roleRepository.save(this.roleRepository.create({
+        name: clerkRoleName,
+        description: 'Vendedor / Cajero de sucursal',
+        isSuperAdmin: false,
+        permissions: clerkPermissions,
+      }));
+    }
+
+    // 3. Create Users
+    const adminEmail = 'admin@pos.com';
+    const existsAdmin = await this.userRepository.findOne({ where: { email: adminEmail } });
+    if (!existsAdmin) {
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await this.userRepository.save(this.userRepository.create({
+        name: 'Administrador Global',
+        email: adminEmail,
+        password: hashedPassword,
+        roles: [adminRole],
+        emailVerified: true,
+      }));
+    }
+
+    const clerkEmail = 'caja@pos.com';
+    const existsClerk = await this.userRepository.findOne({ where: { email: clerkEmail } });
+    if (!existsClerk) {
+      const hashedPassword = await bcrypt.hash('caja123', 10);
+      const branch = await this.branchRepository.findOne({ where: { deletedAt: IsNull() } });
+      
+      await this.userRepository.save(this.userRepository.create({
+        name: 'Cajero de Prueba',
+        email: clerkEmail,
+        password: hashedPassword,
+        roles: [clerkRole!],
+        branch: branch || null,
+        emailVerified: true,
+      }));
+    }
+
+    return { message: 'Sistema inicializado con éxito' };
+  }
+
+  async getDynamicMenu(user: any): Promise<any> {
+    
+    const userWithRelations = await this.userRepository.findOne({
+      where: { id: user.id },
+      relations: ['roles', 'permissions', 'roles.permissions'],
+    });
+
+    if (!userWithRelations) throw new NotFoundException('Usuario no encontrado');
+
+    const userPermissions = new Set([
+      ...userWithRelations.permissions.map(p => p.name),
+      ...userWithRelations.roles.flatMap(r => r.permissions.map(p => p.name))
+    ]);
+
+    const isSuperAdmin = userWithRelations.roles.some(r => r.isSuperAdmin);
+
+    const filterMenu = (items: any[]) => {
+      return items
+        .map(item => {
+          const newItem = { ...item };
+          if (newItem.children) {
+            newItem.children = filterMenu(newItem.children);
+          }
+          
+          const hasPermission = !newItem.permission || isSuperAdmin || userPermissions.has(newItem.permission);
+          const hasVisibleChildren = newItem.children ? newItem.children.length > 0 : true;
+
+          if (hasPermission && hasVisibleChildren) {
+            return newItem;
+          }
+          return null;
+        })
+        .filter(item => item !== null);
+    };
+
+    return {
+      recurrent: filterMenu(RECURRENT_MENU),
+      main: filterMenu(MENU_ITEMS),
+    };
+  }
 
   async createPermission(dto: CreatePermissionDto): Promise<PermissionResponseDto> {
     const existingPermission = await this.permissionRepository.findOne({
