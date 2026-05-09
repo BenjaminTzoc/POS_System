@@ -38,13 +38,13 @@ export const RECURRENT_MENU: MenuItem[] = [
     label: 'Ventas',
     icon: 'pi pi-shopping-cart',
     route: '/sales/orders',
-    permission: 'sales.view',
+    permission: 'orders.view',
   },
   {
     label: 'Venta Rápida',
     icon: 'pi pi-bolt',
     route: '/sales/quick-sale',
-    permission: 'sales.create',
+    permission: 'orders.create',
   },
   {
     label: 'Historial de Cajas',
@@ -56,7 +56,7 @@ export const RECURRENT_MENU: MenuItem[] = [
     label: 'POS Rápido',
     icon: 'pi pi-desktop',
     route: '/sales/pos',
-    permission: 'sales.pos',
+    permission: 'orders.create',
   },
   {
     label: 'Movimientos de inventario',
@@ -127,13 +127,13 @@ export const MENU_ITEMS: MenuItem[] = [
         label: 'Venta Rápida',
         icon: 'pi pi-bolt',
         route: '/sales/quick-sale',
-        permission: 'sales.create',
+        permission: 'orders.create',
       },
       {
         label: 'Órdenes de Venta',
         icon: '',
         route: '/sales/orders',
-        permission: 'sales.view',
+        permission: 'orders.view',
       },
       {
         label: 'Historial de Cajas',

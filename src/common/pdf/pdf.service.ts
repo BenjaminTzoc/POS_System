@@ -6,7 +6,8 @@ import { Quotation, Sale } from '../../sales/entities';
 export class PdfService {
   async generateInvoicePdf(sale: Sale): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 50 });
+      // 80mm ticket width is approximately 226 points. We set a large height to prevent premature page breaks.
+      const doc = new PDFDocument({ margin: 15, size: [226, 1000] });
       const buffers: Buffer[] = [];
 
       doc.on('data', buffers.push.bind(buffers));
@@ -16,82 +17,80 @@ export class PdfService {
       });
 
       // --- Header ---
-      doc.fontSize(20).text('SISTEMA POS', { align: 'center', underline: true });
-      doc.fontSize(10).text('Calle Ficticia 123, Ciudad', { align: 'center' });
-      doc.text('Tel: 2222-3333', { align: 'center' });
-      doc.text('NIT: 1234567-8', { align: 'center' });
-      doc.moveDown();
-      doc.text('------------------------------------------------------------', {
-        align: 'center',
-      });
-      doc.moveDown();
+      doc.fontSize(14).text('SISTEMA POS', { align: 'center' });
+      doc.fontSize(8).text(sale.branch?.name || 'Sucursal Principal', { align: 'center' });
+      doc.text(sale.branch?.address || 'Ciudad', { align: 'center' });
+      doc.text(`Tel: ${sale.branch?.phone || '2222-3333'}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.text('--------------------------------------------------', { align: 'center' });
+      doc.moveDown(0.5);
 
       // --- Sale Info ---
-      doc.fontSize(12).text(`N° Factura: ${sale.invoiceNumber}`);
+      doc.text(`N° Factura: ${sale.invoiceNumber}`);
       doc.text(`Fecha: ${new Date(sale.date).toLocaleString()}`);
 
       const customerName = sale.customer ? sale.customer.name : sale.guestCustomer?.name || 'Consumidor Final';
       const customerNit = sale.customer ? sale.customer.nit : sale.guestCustomer?.nit || 'C/F';
 
       doc.text(`Cliente: ${customerName}`);
-      doc.text(`NIT Cliente: ${customerNit}`);
-      doc.text(`Sucursal: ${sale.branch?.name || 'N/A'}`);
-      doc.moveDown();
-      doc.text('------------------------------------------------------------', {
-        align: 'center',
-      });
-      doc.moveDown();
+      doc.text(`NIT: ${customerNit}`);
+      doc.moveDown(0.5);
+      doc.text('--------------------------------------------------', { align: 'center' });
+      doc.moveDown(0.5);
 
       // --- Table Header ---
-      doc.fontSize(10).text('CANT', 50, doc.y, { continued: true });
-      doc.text(' PRODUCTO', 100, doc.y, { continued: true });
-      doc.text('TOTAL', 450, doc.y);
+      let startY = doc.y;
+      doc.text('CANT', 15, startY, { width: 30 });
+      doc.text('PRODUCTO', 45, startY, { width: 100 });
+      doc.text('TOTAL', 145, startY, { width: 66, align: 'right' });
+      doc.moveDown(0.2);
+      
+      doc.text('--------------------------------------------------', 15, doc.y, { align: 'center', width: 196 });
       doc.moveDown(0.5);
 
       // --- Table Content ---
       sale.details.forEach((detail) => {
-        const startY = doc.y;
-        doc.text(Number(detail.quantity).toFixed(3), 50, startY);
-        doc.text(detail.product?.name || 'Producto Desconocido', 100, startY, {
-          width: 300,
-        });
-        doc.text(`Q${Number(detail.lineTotal).toFixed(2)}`, 450, startY);
-        doc.moveDown();
+        startY = doc.y;
+        doc.text(Number(detail.quantity).toFixed(2), 15, startY, { width: 30 });
+        doc.text(detail.product?.name || 'Producto', 45, startY, { width: 100 });
+        doc.text(`Q${Number(detail.lineTotal).toFixed(2)}`, 145, startY, { width: 66, align: 'right' });
+        doc.moveDown(0.5);
       });
 
-      doc.moveDown();
-      doc.text('------------------------------------------------------------', {
-        align: 'center',
-      });
-      doc.moveDown();
-
-      // --- Totals ---
-      const totalX = 350;
-      doc.text('Subtotal:', totalX, doc.y, { continued: true });
-      doc.text(`Q${Number(sale.subtotal).toFixed(2)}`, 450, doc.y);
+      doc.text('--------------------------------------------------', 15, doc.y, { align: 'center', width: 196 });
       doc.moveDown(0.5);
 
-      doc.text('Impuestos:', totalX, doc.y, { continued: true });
-      doc.text(`Q${Number(sale.taxAmount).toFixed(2)}`, 450, doc.y, {
-        underline: true,
-      });
-      doc.moveDown();
+      // --- Totals ---
+      startY = doc.y;
+      doc.text('Subtotal:', 15, startY, { width: 130, align: 'right' });
+      doc.text(`Q${Number(sale.subtotal).toFixed(2)}`, 145, startY, { width: 66, align: 'right' });
+      doc.moveDown(0.2);
 
-      doc.fontSize(14).text('TOTAL:', totalX, doc.y, { continued: true });
-      doc.text(`Q${Number(sale.total).toFixed(2)}`, 450, doc.y);
-      doc.moveDown();
-      doc.fontSize(10).text('------------------------------------------------------------', {
-        align: 'center',
-      });
-      doc.moveDown();
+      if (Number(sale.discountAmount) > 0) {
+        startY = doc.y;
+        doc.text('Descuento:', 15, startY, { width: 130, align: 'right' });
+        doc.text(`-Q${Number(sale.discountAmount).toFixed(2)}`, 145, startY, { width: 66, align: 'right' });
+        doc.moveDown(0.2);
+      }
+
+      startY = doc.y;
+      doc.text('Impuestos:', 15, startY, { width: 130, align: 'right' });
+      doc.text(`Q${Number(sale.taxAmount).toFixed(2)}`, 145, startY, { width: 66, align: 'right', underline: true });
+      doc.moveDown(0.5);
+
+      startY = doc.y;
+      doc.fontSize(10).text('TOTAL:', 15, startY, { width: 130, align: 'right' });
+      doc.text(`Q${Number(sale.total).toFixed(2)}`, 145, startY, { width: 66, align: 'right' });
+      doc.moveDown(1);
+
+      doc.fontSize(8).text('--------------------------------------------------', 15, doc.y, { align: 'center', width: 196 });
+      doc.moveDown(0.5);
 
       // --- Footer ---
-      doc.moveDown(2);
-      doc.text('¡Gracias por su compra!', { align: 'center' });
-      doc.text('Vuelva pronto', { align: 'center' });
-      doc.moveDown();
-      doc.fontSize(8).text('Sujeto a pagos trimestrales', { align: 'center' });
-      doc.text('Documento para validación tributaria', { align: 'center' });
+      doc.text('¡Gracias por su compra!', { align: 'center', width: 196 });
+      doc.text('Vuelva pronto', { align: 'center', width: 196 });
+      doc.moveDown(0.5);
+      doc.fontSize(6).text('Documento generado digitalmente', { align: 'center', width: 196 });
 
       doc.end();
     });
