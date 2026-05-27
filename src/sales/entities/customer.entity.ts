@@ -7,7 +7,7 @@ export class Customer extends BaseEntity {
   @Column({ length: 200 })
   name: string;
 
-  @Column({ name: 'nit', length: 20, unique: true, nullable: true })
+  @Column({ name: 'nit', type: 'varchar', length: 20, unique: true, nullable: true })
   nit: string | null;
 
   @Column({ name: 'contact_name', type: 'text', nullable: true })
