@@ -8,12 +8,13 @@ export class CreateCustomerDto {
   @IsString()
   name: string;
 
-  @IsNotEmpty()
+  @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? undefined : value))
   @IsString()
-  @Matches(/^[0-9]+-[0-9Kk]?$/, {
-    message: 'El NIT debe tener un formato válido',
+  @Matches(/^([0-9]+-[0-9Kk]?|CF|C\/F|cf|c\/f)$/, {
+    message: 'El NIT debe tener un formato válido (ej. 123456-7, C/F, o CF) o dejarse vacío',
   })
-  nit: string;
+  nit?: string;
 
   @IsOptional()
   @IsString()
@@ -61,9 +62,10 @@ export class UpdateCustomerDto {
   name?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? undefined : value))
   @IsString()
-  @Matches(/^[0-9]+-[0-9Kk]?$/, {
-    message: 'El NIT debe tener un formato válido',
+  @Matches(/^([0-9]+-[0-9Kk]?|CF|C\/F|cf|c\/f)$/, {
+    message: 'El NIT debe tener un formato válido (ej. 123456-7, C/F, o CF) o dejarse vacío',
   })
   nit?: string;
 
@@ -112,6 +114,7 @@ export class CustomerResponseDto extends BaseEntity {
   name: string;
 
   @Expose()
+  @Transform(({ value }) => value || 'C/F')
   nit: string;
 
   @Expose()

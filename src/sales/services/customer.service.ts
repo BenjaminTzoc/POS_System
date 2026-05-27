@@ -40,13 +40,17 @@ export class CustomerService {
   }
 
   async create(dto: CreateCustomerDto): Promise<CustomerResponseDto> {
-    const existingNit = await this.customerRepository.findOne({
-      where: { nit: dto.nit },
-      withDeleted: false,
-    });
+    const normalizedNit = this.normalizeNit(dto.nit);
 
-    if (existingNit) {
-      throw new ConflictException(`El NIT ${dto.nit} ya está registrado`);
+    if (normalizedNit) {
+      const existingNit = await this.customerRepository.findOne({
+        where: { nit: normalizedNit },
+        withDeleted: false,
+      });
+
+      if (existingNit) {
+        throw new ConflictException(`El NIT ${dto.nit} ya está registrado`);
+      }
     }
 
     let category: any = null;
@@ -61,7 +65,7 @@ export class CustomerService {
 
     const customer = this.customerRepository.create({
       name: dto.name,
-      nit: dto.nit,
+      nit: normalizedNit,
       contactName: dto.contactName,
       email: dto.email,
       phone: dto.phone,
@@ -101,8 +105,14 @@ export class CustomerService {
   }
 
   async findByNit(nit: string, includeDeleted: boolean = false): Promise<CustomerResponseDto> {
+    const normalizedNit = this.normalizeNit(nit);
+
+    if (!normalizedNit) {
+      return plainToInstance(CustomerResponseDto, await this.getOrCreateConsumidorFinal());
+    }
+
     const customer = await this.customerRepository.findOne({
-      where: { nit, deletedAt: includeDeleted ? undefined : IsNull() },
+      where: { nit: normalizedNit, deletedAt: includeDeleted ? undefined : IsNull() },
       withDeleted: includeDeleted,
       relations: ['category'],
     });
@@ -137,9 +147,11 @@ export class CustomerService {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
     }
 
-    if (dto.nit && dto.nit !== customer.nit) {
+    const normalizedNit = dto.nit !== undefined ? this.normalizeNit(dto.nit) : customer.nit;
+
+    if (dto.nit !== undefined && normalizedNit !== customer.nit && normalizedNit !== null) {
       const existingNit = await this.customerRepository.findOne({
-        where: { nit: dto.nit, deletedAt: IsNull() },
+        where: { nit: normalizedNit, deletedAt: IsNull() },
       });
 
       if (existingNit) {
@@ -169,7 +181,7 @@ export class CustomerService {
 
     Object.assign(customer, {
       name: dto.name ?? customer.name,
-      nit: dto.nit ?? customer.nit,
+      nit: dto.nit !== undefined ? normalizedNit : customer.nit,
       contactName: dto.contactName ?? customer.contactName,
       email: dto.email ?? customer.email,
       phone: dto.phone ?? customer.phone,
@@ -358,5 +370,14 @@ export class CustomerService {
     const customers = await this.customerRepository.createQueryBuilder('customer').leftJoinAndSelect('customer.category', 'category').where('customer.deletedAt IS NULL').orderBy('customer.totalPurchases', 'DESC').addOrderBy('customer.loyaltyPoints', 'DESC').limit(limit).getMany();
 
     return plainToInstance(CustomerResponseDto, customers);
+  }
+
+  private normalizeNit(nit?: string | null): string | null {
+    if (!nit) return null;
+    const trimmed = nit.trim().toUpperCase();
+    if (trimmed === 'C/F' || trimmed === 'CF') {
+      return null;
+    }
+    return trimmed;
   }
 }
