@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { Quotation, Sale } from '../../sales/entities';
+import { join } from 'path';
+import { existsSync } from 'fs';
 
 @Injectable()
 export class PdfService {
@@ -98,7 +100,7 @@ export class PdfService {
 
   async generateQuotationPdf(quotation: Quotation): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
       const buffers: Buffer[] = [];
 
       doc.on('data', buffers.push.bind(buffers));
@@ -106,106 +108,224 @@ export class PdfService {
         const pdfData = Buffer.concat(buffers);
         resolve(pdfData);
       });
+      doc.on('error', (err) => {
+        reject(err);
+      });
 
-      // Colors
-      const primaryColor = '#000000';
-      const secondaryColor = '#fce4ec'; // Soft pink accent
+      // --- Premium Color Palette ---
+      const COLOR_PRIMARY = '#1A273A';      // Deep slate blue for headers
+      const COLOR_SECONDARY = '#3B4A6B';    // Card headers
+      const COLOR_TEXT = '#3E4A62';         // Body text
+      const COLOR_MUTED = '#627CA7';        // Muted label text
+      const COLOR_ACCENT = '#0C8ABC';       // Ocean blue for line accents
+      const COLOR_RUST = '#C24D2C';         // Rust orange for grand total highlight
+      const COLOR_BG_LIGHT = '#F4F7FC';     // Light card fill
+      const COLOR_BORDER = '#DAEAF7';       // Elegant borders
+      const COLOR_WHITE = '#FFFFFF';
 
-      // --- Header ---
-      doc.fillColor(primaryColor).fontSize(24).text('COTIZACIÓN', { align: 'center' });
-      doc.fontSize(14).text(quotation.branch?.name || '', { align: 'center' });
-      doc.fontSize(12).text(quotation.correlative, { align: 'center' });
-      doc.fontSize(10).text(`Fecha: ${new Date(quotation.createdAt).toLocaleDateString()}`, { align: 'center' });
-      doc.moveDown(2);
+      // --- 1. Top Decorative Bar ---
+      doc.rect(0, 0, 595.28, 8).fill(COLOR_PRIMARY);
 
-      // --- Customer Info ---
-      const startX = 50;
-      doc.fontSize(12).text('CLIENTE', startX, doc.y, { underline: true });
-      doc.moveDown(0.5);
+      // --- 2. Logo / Header Column Setup ---
+      let headerY = 25;
+
+      // Try to find the logo in several potential locations
+      let logoPath = '';
+      const potentialLogoPaths = [
+        join(process.cwd(), 'src/common/pdf/logo.png'),
+        join(process.cwd(), 'dist/common/pdf/logo.png'),
+        join(__dirname, 'logo.png'),
+        join(process.cwd(), 'logo.png')
+      ];
+
+      for (const p of potentialLogoPaths) {
+        if (existsSync(p)) {
+          logoPath = p;
+          break;
+        }
+      }
+
+      if (logoPath) {
+        try {
+          doc.image(logoPath, 40, headerY, { width: 110 });
+        } catch (e) {
+          // Fallback to text if image loading fails
+          doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(22).text('CABEN', 40, headerY);
+          doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(9).text('Soluciones POS', 40, headerY + 24);
+        }
+      } else {
+        // Fallback typography logo
+        doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(22).text('CABEN', 40, headerY);
+        doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(9).text('Soluciones POS', 40, headerY + 24);
+      }
+
+      // Branch details under logo/text
+      const branchName = quotation.branch?.name || 'Sucursal Principal';
+      const branchAddress = quotation.branch?.address || '';
+      const branchPhone = quotation.branch?.phone || '';
+      const branchEmail = quotation.branch?.email || '';
+
+      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
+      doc.text(branchName, 40, headerY + 40, { width: 250 });
+      if (branchAddress) {
+        doc.text(branchAddress, 40, doc.y, { width: 250 });
+      }
+      doc.text(`Tel: ${branchPhone || 'N/A'} ${branchEmail ? ` | Email: ${branchEmail}` : ''}`, 40, doc.y, { width: 250 });
+
+      // Right Column: Quotation Badge & Metadata
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(20).text('COTIZACIÓN', 340, headerY, { align: 'right', width: 215 });
+
+      // Correlative Badge / Pill
+      const badgeY = headerY + 26;
+      doc.roundedRect(360, badgeY, 195, 24, 4).fill(COLOR_BORDER);
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(11).text(quotation.correlative, 360, badgeY + 6, { align: 'center', width: 195 });
+
+      // Dates and Metadata
+      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
+      const dateString = new Date(quotation.createdAt).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+      const validUntilString = new Date(quotation.validUntil).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
       
-      const customerName = quotation.customer ? quotation.customer.name : quotation.guestCustomer?.name || 'Venta General';
+      const diffTime = Math.abs(quotation.validUntil.getTime() - quotation.createdAt.getTime());
+      const validityDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+      doc.text(`Fecha de Emisión: ${dateString}`, 340, badgeY + 34, { align: 'right', width: 215 });
+      doc.text(`Validez: ${validityDays} días (Vence el ${validUntilString})`, 340, doc.y, { align: 'right', width: 215 });
+
+      // --- 3. Divider ---
+      const dividerY = 125;
+      doc.moveTo(40, dividerY).lineTo(555, dividerY).strokeColor(COLOR_BORDER).lineWidth(1).stroke();
+
+      // --- 4. Customer Information Card ---
+      const customerY = 138;
+      // Draw sub-card container
+      doc.roundedRect(40, customerY, 515, 78, 4).fill(COLOR_BG_LIGHT);
+      
+      const customerName = quotation.customer ? quotation.customer.name : quotation.guestCustomer?.name || 'Consumidor Final';
       const customerNit = quotation.customer ? quotation.customer.nit : quotation.guestCustomer?.nit || 'C/F';
       const customerAddress = quotation.customer ? quotation.customer.address : quotation.guestCustomer?.address || 'Ciudad';
       const customerEmail = quotation.customer ? quotation.customer.email : quotation.guestCustomer?.email || 'N/A';
       const customerPhone = quotation.customer ? quotation.customer.phone : quotation.guestCustomer?.phone || 'N/A';
 
-      doc.fontSize(10).text(`Nombre: ${customerName}`);
-      doc.text(`Documento: ${customerNit}`);
-      doc.text(`Dirección: ${customerAddress}`);
-      doc.text(`Correo: ${customerEmail}`);
-      doc.text(`Teléfono: ${customerPhone}`);
-      doc.moveDown(2);
+      // Left Column inside Customer Card
+      doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8).text('INFORMACIÓN DEL CLIENTE', 52, customerY + 8);
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(11).text(customerName, 52, customerY + 20, { width: 240, ellipsis: true });
+      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(9);
+      doc.text(`Dirección: ${customerAddress}`, 52, customerY + 36, { width: 240, height: 26, ellipsis: true });
 
-      // --- Table Header ---
-      const tableTop = doc.y;
-      doc.rect(startX, tableTop, 500, 20).fill(secondaryColor);
-      doc.fillColor(primaryColor).fontSize(10);
-      doc.text('PRODUCTO', 60, tableTop + 5, { width: 300 });
-      doc.text('CANTIDAD', 250, tableTop + 5, { width: 100, align: 'center' });
-      doc.text('PRECIO', 350, tableTop + 5, { width: 100, align: 'center' });
-      doc.text('TOTAL', 450, tableTop + 5, { width: 100, align: 'center' });
-      doc.moveDown(1.5);
+      // Right Column inside Customer Card
+      doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8).text('DETALLES DE CONTACTO', 320, customerY + 8);
+      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(9);
+      doc.text(`NIT / ID: ${customerNit}`, 320, customerY + 20);
+      doc.text(`Teléfono: ${customerPhone}`, 320, customerY + 33);
+      doc.text(`Email: ${customerEmail}`, 320, customerY + 46, { width: 220, ellipsis: true });
 
-      // --- Table Content ---
-      quotation.items.forEach((item) => {
-        const itemY = doc.y;
-        if (itemY > 700) doc.addPage();
-        
-        // Use unitPrice after discount (if discount breakdown is hidden)
-        // unitPriceInDoc = lineTotal / quantity (pre-tax) or lineTotal as whole.
-        // User wants "no mostrar descuentos, solo aplicarse".
-        // lineTotal is usually (qty * unitPrice - discount) + tax.
-        // If we want to show net price per row:
+      // --- 5. Table of Products ---
+      let currentY = 230;
+
+      // Table Header Draw Function
+      const drawTableHeader = (y: number) => {
+        doc.roundedRect(40, y, 515, 24, 2).fill(COLOR_PRIMARY);
+        doc.fillColor(COLOR_WHITE).font('Helvetica-Bold').fontSize(8.5);
+        doc.text('PRODUCTO', 50, y + 7.5, { width: 240 });
+        doc.text('CANTIDAD', 300, y + 7.5, { width: 70, align: 'center' });
+        doc.text('PRECIO UNIT.', 380, y + 7.5, { width: 85, align: 'right' });
+        doc.text('TOTAL', 475, y + 7.5, { width: 70, align: 'right' });
+      };
+
+      drawTableHeader(currentY);
+      currentY += 24;
+
+      // Table Rows
+      quotation.items.forEach((item, index) => {
+        // Page break calculation
+        if (currentY > 700) {
+          doc.addPage();
+          // Draw top accent bar on new page
+          doc.rect(0, 0, 595.28, 8).fill(COLOR_PRIMARY);
+          currentY = 40;
+          drawTableHeader(currentY);
+          currentY += 24;
+        }
+
+        // Row background
+        const rowHeight = 24;
+        if (index % 2 === 1) {
+          doc.rect(40, currentY, 515, rowHeight).fill('#F8FAFC');
+        }
+
+        // Values
         const unitPriceAdjusted = (Number(item.lineTotal) - Number(item.taxAmount)) / Number(item.quantity);
+        const rowTotal = unitPriceAdjusted * Number(item.quantity);
 
-        doc.text(item.product?.name || 'Producto', 60, itemY, { width: 200 });
-        doc.text(Number(item.quantity).toFixed(2), 250, itemY, { width: 100, align: 'center' });
-        doc.text(`Q${unitPriceAdjusted.toFixed(2)}`, 350, itemY, { width: 100, align: 'center' });
-        doc.text(`Q${(unitPriceAdjusted * Number(item.quantity)).toFixed(2)}`, 450, itemY, { width: 100, align: 'center' });
-        doc.moveDown();
-        doc.moveTo(startX, doc.y).lineTo(550, doc.y).strokeColor('#eeeeee').stroke();
-        doc.moveDown(0.5);
+        doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(9);
+        doc.text(item.product?.name || 'Producto', 50, currentY + 7, { width: 240, height: 14, ellipsis: true });
+        
+        doc.text(Number(item.quantity).toFixed(2), 300, currentY + 7, { width: 70, align: 'center' });
+        doc.text(`Q${unitPriceAdjusted.toFixed(2)}`, 380, currentY + 7, { width: 85, align: 'right' });
+        
+        doc.font('Helvetica-Bold').fillColor(COLOR_PRIMARY);
+        doc.text(`Q${rowTotal.toFixed(2)}`, 475, currentY + 7, { width: 70, align: 'right' });
+
+        // Line bottom border
+        doc.moveTo(40, currentY + rowHeight).lineTo(555, currentY + rowHeight).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+
+        currentY += rowHeight;
       });
 
-      doc.moveDown();
+      // --- 6. Summary and Footer Area ---
+      // Check space for totals block
+      if (currentY > 640) {
+        doc.addPage();
+        // Draw top accent bar on new page
+        doc.rect(0, 0, 595.28, 8).fill(COLOR_PRIMARY);
+        currentY = 40;
+      }
 
-      // --- Summary and Totals ---
-      const leftColX = 50;
-      const rightColX = 350;
+      currentY += 15;
 
-      const summaryY = doc.y;
+      // Left Column: Note / Legal Information
+      doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8).text('TÉRMINOS Y CONDICIONES', 40, currentY);
+      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8).text(
+        `• Esta cotización tiene una validez de ${validityDays} días a partir de su emisión.\n` +
+        `• Vence oficialmente el día ${validUntilString}.\n` +
+        `• Pasado este periodo, los precios y existencias pueden estar sujetos a cambios sin previo aviso.`,
+        40,
+        currentY + 12,
+        { width: 270, lineGap: 3 }
+      );
+
+      if (quotation.notes) {
+        doc.moveDown(0.8);
+        doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8).text('NOTAS', 40, doc.y);
+        doc.fillColor(COLOR_TEXT).font('Helvetica-Oblique').fontSize(8).text(quotation.notes, 40, doc.y + 4, { width: 270 });
+      }
+
+      // Right Column: Financial Totals Block
+      const totalsX = 350;
+      let totalsY = currentY;
+
+      doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(9).text('Sub Total (sin impuestos):', totalsX, totalsY, { width: 120 });
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').text(`Q${Number(quotation.subtotal - quotation.discountAmount).toFixed(2)}`, 480, totalsY, { align: 'right', width: 75 });
+
+      totalsY += 18;
+      doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(9).text('Impuestos (IVA 12%):', totalsX, totalsY, { width: 120 });
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').text(`Q${Number(quotation.taxAmount).toFixed(2)}`, 480, totalsY, { align: 'right', width: 75 });
+
+      totalsY += 22;
+      // Grand Total Solid Box with Rust Accent Color (#C24D2C)
+      doc.roundedRect(totalsX - 5, totalsY - 4, 210, 26, 4).fill(COLOR_RUST);
+      doc.fillColor(COLOR_WHITE).font('Helvetica-Bold').fontSize(11).text('TOTAL', totalsX + 8, totalsY + 4);
+      doc.fontSize(12).text(`Q${Number(quotation.total).toFixed(2)}`, 450, totalsY + 3, { align: 'right', width: 95 });
+
+      // --- 7. Page Footer (Fixed at the bottom of the last page) ---
+      const footerY = 765;
+      doc.moveTo(40, footerY - 5).lineTo(555, footerY - 5).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+
+      doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(8.5);
+      doc.text('¡Gracias por confiar en nuestras soluciones!', 40, footerY + 2, { align: 'center', width: 515 });
       
-      const diffTime = Math.abs(quotation.validUntil.getTime() - quotation.createdAt.getTime());
-      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-      
-      doc.fontSize(9).text(`Esta cotización tiene una validez de ${diffDays} días (Vence el ${new Date(quotation.validUntil).toLocaleDateString()}).`, leftColX, summaryY, { width: 250 });
-      doc.text('Después de este tiempo deberá solicitar una nueva cotización', leftColX, doc.y);
-      doc.text('y estará sujeta a variación de precios.', leftColX, doc.y);
-
-      doc.fontSize(10);
-      doc.text('Sub Total', rightColX, summaryY);
-      doc.text(`Q${Number(quotation.subtotal - quotation.discountAmount).toFixed(2)}`, 450, summaryY, { align: 'right' });
-      doc.moveDown(0.5);
-
-      doc.text('IVA', rightColX, doc.y);
-      doc.text(`Q${Number(quotation.taxAmount).toFixed(2)}`, 450, doc.y - 12, { align: 'right' });
-      doc.moveDown(0.5);
-
-      doc.fontSize(12).fillColor('#000000').rect(rightColX, doc.y - 5, 200, 25).fill(secondaryColor);
-      doc.fillColor(primaryColor).text('Total', rightColX + 10, doc.y + 2);
-      doc.text(`Q${Number(quotation.total).toFixed(2)}`, 450, doc.y - 12, { align: 'right' });
-
-      // --- Footer / Banking ---
-      const branchName = quotation.branch?.name || 'Nuestra Empresa';
-      const branchAddress = quotation.branch?.address || '';
-      const branchPhone = quotation.branch?.phone || '';
-      const branchEmail = quotation.branch?.email || '';
-
-      doc.moveDown(4);
-      doc.fontSize(9).text(`Para abonar a esta cotización o pagar el valor total de la misma,`, { align: 'center' });
-      doc.text(`comuníquese con ${branchName}.`, { align: 'center' });
-      doc.moveDown();
-      doc.text(`Dirección: ${branchAddress} | Tel: ${branchPhone} | Email: ${branchEmail}`, { align: 'center' });
+      const detailsText = `Dirección: ${branchAddress || 'N/A'}  |  Teléfono: ${branchPhone || 'N/A'}  |  Email: ${branchEmail || 'N/A'}`;
+      doc.fillColor(COLOR_TEXT).fontSize(7.5).text(detailsText, 40, footerY + 14, { align: 'center', width: 515 });
 
       doc.end();
     });
