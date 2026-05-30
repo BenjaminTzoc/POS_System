@@ -174,6 +174,141 @@ export class QuotationService {
     }
   }
 
+  async update(id: string, dto: CreateQuotationDto): Promise<QuotationResponseDto> {
+    const quotation = await this.quotationRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+    });
+    if (!quotation) throw new NotFoundException('Cotización no encontrada');
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const branch = await this.branchRepository.findOne({
+        where: { id: dto.branchId, deletedAt: IsNull() },
+      });
+      if (!branch) throw new NotFoundException('Sucursal no encontrada');
+
+      const validUntil = new Date();
+      validUntil.setDate(validUntil.getDate() + (dto.validityDays || 15));
+
+      // Update basic fields
+      await queryRunner.manager.update(Quotation, id, {
+        validUntil,
+        notes: dto.notes,
+        customer: dto.customerId ? ({ id: dto.customerId } as any) : null,
+        guestCustomer: (dto.guestCustomer || null) as any,
+        branch,
+        applyTax: dto.applyTax ?? true,
+      });
+
+      // Clear existing items and adjustments
+      await queryRunner.manager.delete(QuotationItem, { quotation: { id } });
+      await queryRunner.manager.delete(QuotationDiscount, { quotation: { id } });
+
+      let subtotal = 0;
+      let taxAmount = 0;
+      let lineDiscounts = 0;
+
+      // Re-create items
+      for (const itemDto of dto.items) {
+        const product = await this.productRepository.findOne({
+          where: { id: itemDto.productId, deletedAt: IsNull() },
+        });
+        if (!product) throw new NotFoundException(`Producto ${itemDto.productId} no encontrado`);
+
+        const lineSubtotal = Number(itemDto.quantity) * Number(itemDto.unitPrice);
+
+        let lineDiscount = 0;
+        let discountPct = itemDto.discount || 0;
+
+        if (itemDto.discountType === DiscountType.FIXED_AMOUNT) {
+          lineDiscount = itemDto.discountAmount || 0;
+          discountPct = lineSubtotal > 0 ? (lineDiscount / lineSubtotal) * 100 : 0;
+        } else {
+          lineDiscount = (lineSubtotal * discountPct) / 100;
+        }
+
+        const lineAfterDiscount = lineSubtotal - lineDiscount;
+        const lineTax = (dto.applyTax ?? true) ? (lineAfterDiscount * (itemDto.taxPercentage ?? 12)) / 100 : 0;
+        const lineTotal = lineAfterDiscount + lineTax;
+
+        const item = queryRunner.manager.create(QuotationItem, {
+          quotation: { id } as any,
+          product,
+          quantity: itemDto.quantity,
+          unitPrice: itemDto.unitPrice,
+          discount: discountPct,
+          discountAmount: lineDiscount,
+          discountType: itemDto.discountType || DiscountType.PERCENTAGE,
+          taxPercentage: (dto.applyTax ?? true) ? (itemDto.taxPercentage ?? 12) : 0,
+          taxAmount: lineTax,
+          lineTotal,
+          subtotal: lineSubtotal,
+          originalPrice: itemDto.originalPrice || product.price,
+          notes: itemDto.notes,
+        });
+
+        await queryRunner.manager.save(item);
+
+        subtotal += lineSubtotal;
+        lineDiscounts += lineDiscount;
+        taxAmount += lineTax;
+      }
+
+      // Re-create adjustments
+      let globalAdjustmentsAmount = 0;
+      if (dto.adjustments?.length) {
+        for (const adjDto of dto.adjustments) {
+          let amount = 0;
+          if (adjDto.valueType === QuotationValueType.PERCENTAGE) {
+            amount = subtotal * (adjDto.value / 100);
+          } else {
+            amount = adjDto.value;
+          }
+
+          if (adjDto.adjustmentType === QuotationAdjustmentType.DISCOUNT) {
+            globalAdjustmentsAmount += amount;
+          } else {
+            globalAdjustmentsAmount -= amount;
+          }
+
+          const adjustment = queryRunner.manager.create(QuotationDiscount, {
+            quotation: { id } as any,
+            adjustmentType: adjDto.adjustmentType,
+            valueType: adjDto.valueType,
+            value: adjDto.value,
+            amountApplied: amount,
+            reason: adjDto.reason || null,
+          });
+
+          await queryRunner.manager.save(adjustment);
+        }
+      }
+
+      const totalDiscounts = lineDiscounts + globalAdjustmentsAmount;
+      const taxableBase = subtotal - lineDiscounts;
+      const finalTaxAmount = taxableBase > 0 ? taxAmount * ((taxableBase - globalAdjustmentsAmount) / taxableBase) : 0;
+      const total = taxableBase - globalAdjustmentsAmount + finalTaxAmount;
+
+      await queryRunner.manager.update(Quotation, id, {
+        subtotal,
+        taxAmount: finalTaxAmount,
+        discountAmount: totalDiscounts,
+        total,
+      });
+
+      await queryRunner.commitTransaction();
+      return this.findOne(id);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   async findAll(filters: { status?: QuotationStatus; customerId?: string; branchId?: string; search?: string }): Promise<QuotationResponseDto[]> {
     const query = this.quotationRepository
       .createQueryBuilder('q')

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import { QuotationService } from '../services/quotation.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User as UserDecorator } from 'src/common/decorators/user.decorator';
@@ -29,6 +29,11 @@ export class QuotationController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<QuotationResponseDto> {
     return this.quotationService.findOne(id);
+  }
+
+  @Put(':id')
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateQuotationDto): Promise<QuotationResponseDto> {
+    return this.quotationService.update(id, dto);
   }
 
   @Get(':id/pdf')
