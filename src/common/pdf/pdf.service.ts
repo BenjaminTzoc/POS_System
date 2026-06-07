@@ -166,7 +166,7 @@ export class PdfService {
       const branchEmail = quotation.branch?.email || '';
 
       // Compute branch details Y dynamically to avoid overlap if logo image is present
-      const branchDetailsY = logoPath ? headerY + 95 : headerY + 40;
+      const branchDetailsY = logoPath ? headerY + 115 : headerY + 40;
 
       doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
       doc.text(branchName, 40, branchDetailsY, { width: 250 });
@@ -195,11 +195,11 @@ export class PdfService {
       doc.text(`Validez: ${validityDays} días (Vence el ${validUntilString})`, 340, doc.y, { align: 'right', width: 215 });
 
       // --- 3. Divider ---
-      const dividerY = 155;
+      const dividerY = 175;
       doc.moveTo(40, dividerY).lineTo(555, dividerY).strokeColor(COLOR_BORDER).lineWidth(1).stroke();
 
       // --- 4. Customer Information Card ---
-      const customerY = 168;
+      const customerY = 188;
       // Draw sub-card container
       doc.roundedRect(40, customerY, 515, 78, 4).fill(COLOR_BG_LIGHT);
       
@@ -223,7 +223,7 @@ export class PdfService {
       doc.text(`Email: ${customerEmail}`, 320, customerY + 46, { width: 220, ellipsis: true });
 
       // --- 5. Table of Products ---
-      let currentY = 260;
+      let currentY = 280;
 
       // Table Header Draw Function
       const drawTableHeader = (y: number) => {

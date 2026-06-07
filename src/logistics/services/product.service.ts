@@ -675,8 +675,20 @@ export class ProductService {
     return plainToInstance(ProductResponseDto, updatedProduct);
   }
 
-  async getBranchCatalog(branchId: string): Promise<BranchProductResponseDto[]> {
-    const query = this.productRepository.createQueryBuilder('product').leftJoinAndSelect('product.unit', 'unit').innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId }).where('product.deletedAt IS NULL').andWhere('product.isActive = :isActive', { isActive: true }).select(['product.id', 'product.name', 'product.sku', 'product.imageUrl', 'product.price', 'unit.name', 'unit.abbreviation', 'unit.allowsDecimals']).addSelect('inventory.stock', 'stock').orderBy('product.name', 'ASC');
+  async getBranchCatalog(branchId: string, isMaster?: boolean): Promise<BranchProductResponseDto[]> {
+    const query = this.productRepository
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId })
+      .where('product.deletedAt IS NULL')
+      .andWhere('product.isActive = :isActive', { isActive: true })
+      .select(['product.id', 'product.name', 'product.sku', 'product.imageUrl', 'product.price', 'unit.name', 'unit.abbreviation', 'unit.allowsDecimals'])
+      .addSelect('inventory.stock', 'stock')
+      .orderBy('product.name', 'ASC');
+
+    if (isMaster !== undefined) {
+      query.andWhere('product.isMaster = :isMaster', { isMaster });
+    }
 
     const rawProducts = await query.getRawMany();
 

@@ -63,7 +63,7 @@ export class ProductController {
   ): Promise<ProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
-    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
+    const branchId = branchIdParam || user.branch?.id;
 
     if (!isSuperAdmin(user) && !branchId) {
       throw new ForbiddenException('Usuario sin sucursal asignada');
@@ -91,7 +91,7 @@ export class ProductController {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
-    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
+    const branchId = branchIdParam || user.branch?.id;
 
     if (!isSuperAdmin(user) && !branchId) {
       throw new ForbiddenException('Usuario sin sucursal asignada');
@@ -107,7 +107,7 @@ export class ProductController {
   @Get('top-selling')
   async getTopSelling(@Query('branchId') branchIdParam: string, @Req() req): Promise<ProductResponseDto[]> {
     const user = req.user;
-    const branchId = isSuperAdmin(user) ? branchIdParam : user.branch?.id;
+    const branchId = branchIdParam || user.branch?.id;
 
     if (!isSuperAdmin(user) && !branchId) {
       throw new ForbiddenException('Usuario sin sucursal asignada');
@@ -117,9 +117,12 @@ export class ProductController {
   }
 
   @Get('branch/:branchId/catalog')
-  @Permissions('products.manage')
-  async getBranchCatalog(@Param('branchId', ParseUUIDPipe) branchId: string): Promise<BranchProductResponseDto[]> {
-    return this.productService.getBranchCatalog(branchId);
+  async getBranchCatalog(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+    @Query('isMaster') isMaster?: string,
+  ): Promise<BranchProductResponseDto[]> {
+    const isMasterBool = isMaster === 'true' ? true : isMaster === 'false' ? false : undefined;
+    return this.productService.getBranchCatalog(branchId, isMasterBool);
   }
 
   @Get('sku/:sku')
