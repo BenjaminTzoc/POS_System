@@ -49,8 +49,7 @@ export class QuotationController {
 
   @Post(':id/send-email')
   async sendEmail(@Param('id', ParseUUIDPipe) id: string, @Body('email') email: string): Promise<{ message: string }> {
-    await this.quotationService.sendQuotationEmail(id, email);
-    return { message: 'Correo enviado exitosamente' };
+    return this.quotationService.sendQuotationEmail(id, email);
   }
 
   @Patch(':id/status')

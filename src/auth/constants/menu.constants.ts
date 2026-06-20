@@ -86,6 +86,12 @@ export const MENU_ITEMS: MenuItem[] = [
     permission: '',
   },
   {
+    label: 'Venta Rápida',
+    icon: 'pi pi-bolt',
+    route: '/sales/quick-sale',
+    permission: 'orders.create',
+  },
+  {
     label: 'Inventario',
     icon: 'pi pi-box',
     route: '/inventory',
@@ -109,12 +115,6 @@ export const MENU_ITEMS: MenuItem[] = [
         route: '/inventory/inventory-transfers',
         permission: 'inventory.transfers',
       },
-      {
-        label: 'Movimientos',
-        icon: 'pi pi-objects-column',
-        route: '/inventory/inventory-movements',
-        permission: 'inventory.movements',
-      }
     ],
   },
   {
@@ -124,10 +124,10 @@ export const MENU_ITEMS: MenuItem[] = [
     permission: 'sales.view',
     children: [
       {
-        label: 'Venta Rápida',
-        icon: 'pi pi-bolt',
-        route: '/sales/quick-sale',
-        permission: 'orders.create',
+        label: 'Cotizaciones',
+        icon: 'pi pi-file-edit',
+        route: '/sales/quotations',
+        permission: 'quotations.view',
       },
       {
         label: 'Órdenes de Venta',
@@ -135,26 +135,26 @@ export const MENU_ITEMS: MenuItem[] = [
         route: '/sales/orders',
         permission: 'orders.view',
       },
+    ],
+  },
+  {
+    label: 'Administración',
+    icon: 'pi pi-cog',
+    route: '/admin',
+    permission: 'admin.view',
+    children: [
+      {
+        label: 'Ordenes de compra',
+        icon: 'pi pi-shopping-cart',
+        route: '/purchases/orders',
+        permission: 'purchases.view',
+      },
       {
         label: 'Historial de Cajas',
         icon: 'pi pi-history',
         route: '/sales/cash-history',
         permission: 'cash.view',
       },
-      {
-        label: 'Cotizaciones',
-        icon: 'pi pi-file-edit',
-        route: '/sales/quotations',
-        permission: 'quotations.view',
-      },
-    ],
-  },
-  {
-    label: 'Producción',
-    icon: 'pi pi-microchip-ai',
-    route: '/production',
-    permission: 'production.view',
-    children: [
       {
         label: 'Despiece (Cortes)',
         icon: 'pi pi-percentage',
@@ -172,15 +172,7 @@ export const MENU_ITEMS: MenuItem[] = [
         icon: 'pi pi-receipt',
         route: '/production/recipes',
         permission: 'production.recipes',
-      }
-    ]
-  },
-  {
-    label: 'Logística',
-    icon: 'pi pi-truck',
-    route: '/logistics',
-    permission: 'logistics.view',
-    children: [
+      },
       {
         label: 'Despachos de Ruta',
         icon: 'pi pi-send',
@@ -192,28 +184,8 @@ export const MENU_ITEMS: MenuItem[] = [
         icon: 'pi pi-calculator',
         route: '/logistics/settlements',
         permission: 'logistics.settlements',
-      },
-      {
-        label: 'Devoluciones',
-        icon: 'pi pi-backward',
-        route: '/logistics/returns',
-        permission: 'logistics.returns',
       }
     ]
-  },
-  {
-    label: 'Compras',
-    icon: 'pi pi-shopping-bag',
-    route: '/purchases',
-    permission: 'purchases.view',
-    children: [
-      {
-        label: 'Ordenes de compra',
-        icon: 'pi pi-shopping-cart',
-        route: '/purchases/orders',
-        permission: 'purchases.view',
-      },
-    ],
   },
   {
     label: 'Catálogos',

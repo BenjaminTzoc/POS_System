@@ -16,10 +16,13 @@ import {
   SaleDiscount,
 } from '../entities';
 import { CreateQuotationDto, QuotationResponseDto, UpdateQuotationStatusDto } from '../dto';
-import { Branch, Product } from 'src/logistics/entities';
+import { Branch, Product, MovementType, MovementStatus, MovementConcept } from 'src/logistics/entities';
 import { PreparationStatus } from '../entities/sale-detail.entity';
 import { PdfService } from 'src/common/pdf/pdf.service';
 import { MailService } from 'src/common/mail/mail.service';
+import { InventoryMovementService } from 'src/logistics/services';
+import { CustomerService } from './customer.service';
+import { DiscountCodeService } from './discount-code.service';
 
 @Injectable()
 export class QuotationService {
@@ -37,6 +40,9 @@ export class QuotationService {
     private readonly dataSource: DataSource,
     private readonly pdfService: PdfService,
     private readonly mailService: MailService,
+    private readonly inventoryMovementService: InventoryMovementService,
+    private readonly customerService: CustomerService,
+    private readonly discountCodeService: DiscountCodeService,
   ) {}
 
   async create(dto: CreateQuotationDto, userId: string): Promise<QuotationResponseDto> {
@@ -377,6 +383,32 @@ export class QuotationService {
       throw new BadRequestException('La cotización ha expirado');
     }
 
+    // 1. Validar stock antes de realizar la conversión
+    const stockErrors: string[] = [];
+    for (const qItem of quotation.items) {
+      const manageStock = qItem.product.manageStock;
+      if (manageStock === false) continue;
+
+      const stockQuery = await this.dataSource
+        .createQueryBuilder()
+        .select(['product.id', 'product.name', 'COALESCE(SUM(inventory.stock), 0) AS current_stock'])
+        .from('products', 'product')
+        .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: quotation.branch.id })
+        .where('product.id = :productId', { productId: qItem.product.id })
+        .andWhere('product.deletedAt IS NULL')
+        .groupBy('product.id')
+        .getRawOne();
+
+      const currentStock = stockQuery ? Number(stockQuery.current_stock || 0) : 0;
+      if (currentStock < qItem.quantity) {
+        stockErrors.push(`Producto "${qItem.product.name}" - Stock insuficiente: solicitado ${qItem.quantity}, disponible ${currentStock}`);
+      }
+    }
+
+    if (stockErrors.length > 0) {
+      throw new BadRequestException({ message: 'Error de stock en los productos', errors: stockErrors });
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -386,7 +418,7 @@ export class QuotationService {
 
       const sale = queryRunner.manager.create(Sale, {
         invoiceNumber,
-        status: SaleStatus.PENDING,
+        status: SaleStatus.CONFIRMED, // Al ser confirmada se descuenta stock
         customer: quotation.customer,
         guestCustomer: quotation.guestCustomer,
         branch: quotation.branch,
@@ -422,15 +454,33 @@ export class QuotationService {
           currentArea: qItem.product.area ? (qItem.product.area as any) : null,
         });
         await queryRunner.manager.save(saleDetail);
+
+        // Crear el movimiento de stock (Salida por venta)
+        if (qItem.product.manageStock) {
+          await this.inventoryMovementService.create(
+            {
+              productId: qItem.product.id,
+              branchId: quotation.branch.id,
+              quantity: qItem.quantity,
+              type: MovementType.OUT,
+              notes: `Venta (desde Cotización ${quotation.correlative}) ${sale.invoiceNumber}`,
+              unitCost: qItem.product.cost,
+              totalCost: qItem.quantity * qItem.product.cost,
+              status: MovementStatus.COMPLETED,
+              referenceId: savedSale.id,
+              referenceNumber: sale.invoiceNumber,
+              concept: MovementConcept.SALE,
+            },
+            userId,
+            true,
+            queryRunner.manager,
+          );
+        }
       }
 
       // Map Adjustments (Discounts/Increases)
-      // Note: SaleDiscount only supports 'percent' | 'amount'. 
-      // Current system might not support 'increase' in Sales yet, but we'll map them as discounts if they were discounts.
       if (quotation.discounts?.length) {
         for (const qDisc of quotation.discounts) {
-          // If it's an increase, we'll map it with a sign or just as an amount if SaleDiscount grows to support it.
-          // For now, mirroring existing fields.
           const saleDiscount = queryRunner.manager.create(SaleDiscount, {
             sale: savedSale,
             type: qDisc.valueType === QuotationValueType.PERCENTAGE ? 'percent' : 'amount',
@@ -440,6 +490,11 @@ export class QuotationService {
           });
           await queryRunner.manager.save(saleDiscount);
         }
+      }
+
+      // Actualizar estadísticas de compra del cliente
+      if (quotation.customer) {
+        await this.customerService.updatePurchaseStats(quotation.customer.id, sale.total);
       }
 
       quotation.status = QuotationStatus.CONVERTED;
@@ -515,7 +570,7 @@ export class QuotationService {
     return this.pdfService.generateQuotationPdf(quotation);
   }
 
-  async sendQuotationEmail(id: string, email: string): Promise<void> {
+  async sendQuotationEmail(id: string, email: string): Promise<{ message: string }> {
     const quotation = await this.quotationRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['customer', 'items', 'items.product'],
@@ -523,12 +578,18 @@ export class QuotationService {
 
     if (!quotation) throw new NotFoundException('Cotización no encontrada');
 
+    const targetEmail = email || quotation.customer?.email || quotation.guestCustomer?.email || '';
+
+    if (!targetEmail) {
+      return { message: 'La cotización no tiene un correo electrónico asociado' };
+    }
+
     const pdfBuffer = await this.generatePdf(id);
 
     const customerName = quotation.customer ? quotation.customer.name : quotation.guestCustomer?.name || 'Cliente';
 
     await this.mailService.sendMail(
-      email || quotation.customer?.email || quotation.guestCustomer?.email || '',
+      targetEmail,
       `Cotización ${quotation.correlative} - Sistema POS`,
       `Estimado(a) ${customerName},\n\nAdjunto encontrará la cotización solicitada.\n\nSaludos,\nEquipo de Ventas`,
       [
@@ -538,6 +599,8 @@ export class QuotationService {
         },
       ],
     );
+
+    return { message: 'Correo enviado exitosamente' };
   }
 
   async generateCorrelative(): Promise<string> {

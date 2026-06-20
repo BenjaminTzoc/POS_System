@@ -125,6 +125,13 @@ export class ProductController {
     return this.productService.getBranchCatalog(branchId, isMasterBool);
   }
 
+  @Get('branch/:branchId/quotation-catalog')
+  async getQuotationCatalog(
+    @Param('branchId', ParseUUIDPipe) branchId: string,
+  ): Promise<BranchProductResponseDto[]> {
+    return this.productService.getQuotationCatalog(branchId);
+  }
+
   @Get('sku/:sku')
   @Public()
   findBySku(@Param('sku') sku: string): Promise<ProductResponseDto> {

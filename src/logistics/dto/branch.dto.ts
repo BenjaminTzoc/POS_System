@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNotEmpty, IsEmail, MaxLength, Matches } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsEmail, MaxLength, Matches, IsBoolean } from 'class-validator';
 import { Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 
@@ -26,7 +26,12 @@ export class CreateBranchDto {
   email?: string;
 
   @IsOptional()
+  @IsBoolean()
   isPlant?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isCentral?: boolean;
 }
 
 export class UpdateBranchDto {
@@ -53,7 +58,12 @@ export class UpdateBranchDto {
   email?: string;
 
   @IsOptional()
+  @IsBoolean()
   isPlant?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isCentral?: boolean;
 }
 
 export class BranchResponseDto extends BaseEntity {
@@ -71,6 +81,9 @@ export class BranchResponseDto extends BaseEntity {
 
   @Expose()
   isPlant: boolean;
+
+  @Expose()
+  isCentral: boolean;
 
   @Expose()
   declare createdAt: Date;

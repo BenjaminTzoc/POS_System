@@ -679,30 +679,102 @@ export class ProductService {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('product.inventories', 'inventories', 'inventories.branch_id = :branchId', { branchId })
+      .leftJoinAndSelect('product.variants', 'variants')
+      .leftJoinAndSelect('variants.unit', 'vUnit')
+      .leftJoinAndSelect('variants.inventories', 'vInventories', 'vInventories.branch_id = :branchId', { branchId })
+      .where('product.deletedAt IS NULL')
+      .andWhere('product.isActive = :isActive', { isActive: true });
+
+    if (isMaster === false) {
+      query.andWhere('product.isMaster = :isMaster', { isMaster: false });
+    } else if (isMaster === true) {
+      query.andWhere('product.isMaster = :isMaster', { isMaster: true });
+      query.andWhere('product.parent_id IS NULL');
+    } else {
+      query.andWhere('product.parent_id IS NULL');
+    }
+
+    query.orderBy('product.name', 'ASC');
+
+    const products = await query.getMany();
+
+    return products.map((p) => {
+      const dto = new BranchProductResponseDto();
+      dto.id = p.id;
+      dto.name = p.name;
+      dto.sku = p.sku;
+      dto.imageUrl = p.imageUrl ?? null;
+      dto.price = Number(p.price);
+      dto.stock = p.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
+      dto.unitName = p.unit?.name || null;
+      dto.unitAbbreviation = p.unit?.abbreviation || null;
+      dto.allowsDecimals = p.unit?.allowsDecimals || false;
+
+      if (p.variants && p.variants.length > 0) {
+        dto.variants = p.variants
+          .filter(v => v.deletedAt === null && v.isActive === true)
+          .map((v) => {
+            const vDto = new BranchProductResponseDto();
+            vDto.id = v.id;
+            vDto.name = v.name;
+            vDto.sku = v.sku;
+            vDto.imageUrl = v.imageUrl ?? null;
+            vDto.price = Number(v.price);
+            vDto.stock = v.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
+            vDto.unitName = v.unit?.name || p.unit?.name || null;
+            vDto.unitAbbreviation = v.unit?.abbreviation || p.unit?.abbreviation || null;
+            vDto.allowsDecimals = v.unit?.allowsDecimals ?? p.unit?.allowsDecimals ?? false;
+            return vDto;
+          });
+      }
+
+      return dto;
+    });
+  }
+
+  async getQuotationCatalog(branchId: string): Promise<BranchProductResponseDto[]> {
+    const query = this.productRepository
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('product.parent', 'parent')
       .innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId })
       .where('product.deletedAt IS NULL')
       .andWhere('product.isActive = :isActive', { isActive: true })
-      .select(['product.id', 'product.name', 'product.sku', 'product.imageUrl', 'product.price', 'unit.name', 'unit.abbreviation', 'unit.allowsDecimals'])
+      .andWhere('product.isMaster = :isMaster', { isMaster: false })
+      .select([
+        'product.id',
+        'product.name',
+        'product.sku',
+        'product.imageUrl',
+        'product.price',
+        'unit.name',
+        'unit.abbreviation',
+        'unit.allowsDecimals',
+        'parent.name'
+      ])
       .addSelect('inventory.stock', 'stock')
       .orderBy('product.name', 'ASC');
-
-    if (isMaster !== undefined) {
-      query.andWhere('product.isMaster = :isMaster', { isMaster });
-    }
 
     const rawProducts = await query.getRawMany();
 
     return rawProducts.map((p) => {
       const dto = new BranchProductResponseDto();
       dto.id = p.product_id;
-      dto.name = p.product_name;
+      
+      // Format name to include parent name if it is a variant and does not already include it
+      let displayName = p.product_name;
+      if (p.parent_name && !p.product_name.toLowerCase().includes(p.parent_name.toLowerCase())) {
+        displayName = `${p.parent_name} - ${p.product_name}`;
+      }
+      
+      dto.name = displayName;
       dto.sku = p.product_sku;
-      dto.imageUrl = p.product_imageUrl;
+      dto.imageUrl = p.product_imageUrl ?? null;
       dto.price = Number(p.product_price);
       dto.stock = Number(p.stock);
       dto.unitName = p.unit_name;
       dto.unitAbbreviation = p.unit_abbreviation;
-      // Probamos ambos formatos de nombre por si acaso (camelCase y snake_case)
       const allowsDec = p.unit_allowsDecimals ?? p.unit_allows_decimals;
       dto.allowsDecimals = allowsDec === 1 || allowsDec === true || allowsDec === '1';
       return dto;

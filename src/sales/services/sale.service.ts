@@ -559,13 +559,11 @@ export class SaleService {
     // Date Filters
     if (startDate || endDate) {
       if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
+        const start = new Date(`${startDate}T00:00:00.000Z`);
         query.andWhere('sale.date >= :start', { start });
       }
       if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
+        const end = new Date(`${endDate}T23:59:59.999Z`);
         query.andWhere('sale.date <= :end', { end });
       }
     } else if (!search) {
@@ -1047,7 +1045,7 @@ export class SaleService {
     return { nextNumber };
   }
 
-  async sendSaleEmail(id: string): Promise<{ message: string }> {
+  async sendSaleEmail(id: string, pdfBase64?: string): Promise<{ message: string }> {
     const sale = await this.saleRepository.findOne({
       where: { id },
       relations: ['customer', 'details', 'details.product', 'branch', 'payments', 'payments.paymentMethod'],
@@ -1060,11 +1058,16 @@ export class SaleService {
     const email = sale.customer?.email || sale.guestCustomer?.email;
 
     if (!email) {
-      throw new BadRequestException('La venta no tiene un correo electrónico asociado');
+      return { message: 'La venta no tiene un correo electrónico asociado' };
     }
 
     try {
-      const pdfBuffer = await this.pdfService.generateInvoicePdf(sale);
+      let pdfBuffer: Buffer;
+      if (pdfBase64) {
+        pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      } else {
+        pdfBuffer = await this.pdfService.generateInvoicePdf(sale);
+      }
 
       const subject = `Factura ${sale.invoiceNumber} - Sistema POS`;
       const text = `Hola ${sale.customer?.name || sale.guestCustomer?.name},\n\nAdjunto encontrarás la factura de tu compra correspondiente al número ${sale.invoiceNumber}.\n\nGracias por tu preferencia.`;

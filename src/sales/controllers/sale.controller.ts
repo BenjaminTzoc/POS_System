@@ -151,7 +151,10 @@ export class SaleController {
 
   @Post(':id/send-email')
   @HttpCode(HttpStatus.OK)
-  sendEmail(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
-    return this.saleService.sendSaleEmail(id);
+  sendEmail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('pdfBase64') pdfBase64?: string,
+  ): Promise<{ message: string }> {
+    return this.saleService.sendSaleEmail(id, pdfBase64);
   }
 }

@@ -3,6 +3,8 @@ import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, Role, Permission } from '../../auth/entities';
 import { Branch } from '../../logistics/entities';
+import { PaymentMethod } from '../../purchases/entities';
+import { CustomerCategory } from '../../sales/entities';
 import { AuthService } from 'src/auth/auth.service';
 
 @Injectable()
@@ -116,8 +118,22 @@ export class SeedService {
         address: 'Ciudad de Guatemala',
         phone: '12345678',
         isPlant: true,
+        isCentral: true,
       });
       await queryRunner.manager.save(planta);
+
+      // Crear Métodos de Pago más comunes
+      const paymentMethodsList = [
+        { name: 'Efectivo', code: 'cash', description: 'Pago en efectivo', requiresBankAccount: false },
+        { name: 'Transferencia Bancaria', code: 'bank_transfer', description: 'Transferencia o depósito bancario', requiresBankAccount: true },
+        { name: 'Tarjeta de Crédito/Débito', code: 'card', description: 'Pago con tarjeta', requiresBankAccount: false },
+        { name: 'Cheque', code: 'check', description: 'Pago con cheque', requiresBankAccount: true },
+      ];
+
+      for (const pm of paymentMethodsList) {
+        const paymentMethod = queryRunner.manager.create(PaymentMethod, pm);
+        await queryRunner.manager.save(paymentMethod);
+      }
 
       // Crear Usuario Administrador
       const hashedPassword = await bcrypt.hash('admin123', 10);
@@ -130,6 +146,17 @@ export class SeedService {
         emailVerified: true,
       });
       await queryRunner.manager.save(adminUser);
+
+      // Crear Categoría de Cliente por defecto
+      const defaultCustomerCategory = queryRunner.manager.create(CustomerCategory, {
+        name: 'General',
+        description: 'Categoría general por defecto para nuevos clientes',
+        discountPercentage: 0,
+        minPurchaseAmount: 0,
+        defaultCreditLimit: 0,
+        isActive: true,
+      });
+      await queryRunner.manager.save(defaultCustomerCategory);
 
       // 4. Seeding dinámico de permisos y roles basado en el menú
       await this.authService.seedDefaultData(queryRunner.manager);

@@ -21,8 +21,9 @@ export class CreateCustomerDto {
   contactName?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
   @IsEmail()
-  email?: string;
+  email?: string | null;
 
   @IsOptional()
   @IsString()
@@ -74,8 +75,9 @@ export class UpdateCustomerDto {
   contactName?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
   @IsEmail()
-  email?: string;
+  email?: string | null;
 
   @IsOptional()
   @IsString()

@@ -191,6 +191,10 @@ export class BranchProductResponseDto {
 
   @Expose()
   price: number;
+
+  @Expose()
+  @Type(() => BranchProductResponseDto)
+  variants?: BranchProductResponseDto[];
 }
 
 export class ProductResponseDto extends BaseEntity {

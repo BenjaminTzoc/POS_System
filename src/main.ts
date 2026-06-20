@@ -1,12 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ limit: '10mb', extended: true }));
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
@@ -36,6 +40,9 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 Application running on: http://localhost:${port}/api/v1`);
+  const logger = new Logger('Bootstrap');
+  const url = process.env.APP_URL || `http://localhost:${port}`;
+  
+  logger.log(`🚀 Application is running on: ${url}/api/v1`);
 }
 bootstrap();

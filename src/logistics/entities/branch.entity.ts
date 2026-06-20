@@ -20,6 +20,9 @@ export class Branch extends BaseEntity {
   @Column({ name: 'is_plant', type: 'boolean', default: false })
   isPlant: boolean;
 
+  @Column({ name: 'is_central', type: 'boolean', default: false })
+  isCentral: boolean;
+
   @OneToMany(() => User, (user) => user.branch)
   users: User[];
 
