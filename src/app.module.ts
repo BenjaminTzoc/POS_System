@@ -13,6 +13,7 @@ import { ReportsModule } from './reports/reports.module';
 import { FinanceModule } from './finances/finance.module';
 import { ProductionModule } from './production/production.module';
 import { SeedModule } from './common/seed/seed.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SeedModule } from './common/seed/seed.module';
     FinanceModule,
     ProductionModule,
     SeedModule,
+    SettingsModule,
   ],
   controllers: [],
   providers: [

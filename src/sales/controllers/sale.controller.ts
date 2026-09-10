@@ -157,4 +157,13 @@ export class SaleController {
   ): Promise<{ message: string }> {
     return this.saleService.sendSaleEmail(id, pdfBase64);
   }
+
+  @Post(':id/send-whatsapp')
+  @HttpCode(HttpStatus.OK)
+  sendWhatsApp(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('pdfBase64') pdfBase64?: string,
+  ): Promise<{ message: string }> {
+    return this.saleService.sendSaleWhatsApp(id, pdfBase64);
+  }
 }

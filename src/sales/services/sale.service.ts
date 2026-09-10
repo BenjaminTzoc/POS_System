@@ -1114,4 +1114,129 @@ export class SaleService {
 
     return savedDetail;
   }
+
+  async uploadMediaToMeta(pdfBuffer: Buffer, fileName: string): Promise<string> {
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (!token || !phoneId) {
+      throw new BadRequestException('Las credenciales de WhatsApp no están configuradas');
+    }
+
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
+    formData.append('file', blob, fileName);
+    formData.append('messaging_product', 'whatsapp');
+
+    const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/media`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Meta Media Upload Error:', errText);
+      throw new InternalServerErrorException(`Fallo al subir el ticket a Meta: ${errText}`);
+    }
+
+    const result = (await response.json()) as { id: string };
+    return result.id;
+  }
+
+  async sendSaleWhatsApp(id: string, pdfBase64?: string): Promise<{ message: string }> {
+    const sale = await this.saleRepository.findOne({
+      where: { id },
+      relations: ['customer', 'details', 'details.product', 'branch', 'payments', 'payments.paymentMethod'],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    const phone = sale.customer?.phone || sale.guestCustomer?.phone;
+    if (!phone) {
+      throw new BadRequestException('El cliente no tiene un número de teléfono asociado');
+    }
+
+    let cleanPhone = phone.replace(/\D/g, '');
+    const defaultPrefix = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '502';
+    if (cleanPhone.length === 8) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    } else if (cleanPhone.length > 0 && !cleanPhone.startsWith(defaultPrefix)) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    }
+
+    try {
+      let pdfBuffer: Buffer;
+      if (pdfBase64) {
+        pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      } else {
+        pdfBuffer = await this.pdfService.generateInvoicePdf(sale);
+      }
+
+      const mediaId = await this.uploadMediaToMeta(pdfBuffer, `Factura_${sale.invoiceNumber}.pdf`);
+
+      const token = process.env.WHATSAPP_TOKEN;
+      const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+      const customerName = sale.customer?.name || sale.guestCustomer?.name || 'Cliente';
+
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'template',
+        template: {
+          name: 'envio_ticket_pos',
+          language: {
+            code: 'es',
+          },
+          components: [
+            {
+              type: 'header',
+              parameters: [
+                {
+                  type: 'document',
+                  document: {
+                    id: mediaId,
+                    filename: `Factura_${sale.invoiceNumber}.pdf`,
+                  },
+                },
+              ],
+            },
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: customerName },
+                { type: 'text', text: sale.invoiceNumber },
+                { type: 'text', text: `Q${Number(sale.total).toFixed(2)}` },
+              ],
+            },
+          ],
+        },
+      };
+
+      const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Meta Send Message Error:', errText);
+        throw new InternalServerErrorException(`Fallo al enviar el mensaje de WhatsApp: ${errText}`);
+      }
+
+      return { message: 'WhatsApp enviado exitosamente' };
+    } catch (error) {
+      console.error('Error in sendSaleWhatsApp:', error);
+      throw error;
+    }
+  }
 }

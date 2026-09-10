@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User, Role, Permission } from '../../auth/entities';
-import { Branch } from '../../logistics/entities';
+import { Branch, Unit, Category } from '../../logistics/entities';
 import { PaymentMethod } from '../../purchases/entities';
 import { CustomerCategory } from '../../sales/entities';
 import { AuthService } from 'src/auth/auth.service';
@@ -157,6 +157,36 @@ export class SeedService {
         isActive: true,
       });
       await queryRunner.manager.save(defaultCustomerCategory);
+
+      // Crear Unidades de Medida (ideales para carnicería)
+      const unitsData = [
+        { name: 'Libra',     abbreviation: 'lb',  allowsDecimals: true,  description: 'Libra (0.453 kg) - unidad principal de venta' },
+        { name: 'Kilogramo', abbreviation: 'kg',  allowsDecimals: true,  description: 'Kilogramo' },
+        { name: 'Gramo',     abbreviation: 'g',   allowsDecimals: true,  description: 'Gramo - para especias y aditivos' },
+        { name: 'Unidad',    abbreviation: 'und', allowsDecimals: false, description: 'Pieza o unidad individual' },
+        { name: 'Paquete',   abbreviation: 'pqt', allowsDecimals: false, description: 'Paquete o bandeja empacada' },
+      ];
+
+      const savedUnits: Record<string, Unit> = {};
+      for (const u of unitsData) {
+        const unit = queryRunner.manager.create(Unit, u);
+        savedUnits[u.abbreviation] = await queryRunner.manager.save(unit);
+      }
+
+      // Crear Categorías iniciales para carnicería
+      const categoriesList = [
+        { name: 'Carnes Rojas',   description: 'Res, cerdo y similares',          defaultUnit: savedUnits['lb'] },
+        { name: 'Aves',           description: 'Pollo, pavo y otras aves',         defaultUnit: savedUnits['lb'] },
+        { name: 'Embutidos',      description: 'Chorizos, salchichas, mortadela',  defaultUnit: savedUnits['lb'] },
+        { name: 'Mariscos',       description: 'Camarón, pescado y mariscos',      defaultUnit: savedUnits['lb'] },
+        { name: 'Especias',       description: 'Condimentos y adobos',             defaultUnit: savedUnits['g']  },
+        { name: 'Empacados',      description: 'Productos listos en bandeja',      defaultUnit: savedUnits['pqt'] },
+      ];
+
+      for (const c of categoriesList) {
+        const category = queryRunner.manager.create(Category, c);
+        await queryRunner.manager.save(category);
+      }
 
       // 4. Seeding dinámico de permisos y roles basado en el menú
       await this.authService.seedDefaultData(queryRunner.manager);

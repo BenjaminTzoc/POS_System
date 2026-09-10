@@ -184,6 +184,12 @@ export const MENU_ITEMS: MenuItem[] = [
         icon: 'pi pi-calculator',
         route: '/logistics/settlements',
         permission: 'logistics.settlements',
+      },
+      {
+        label: 'Datos de la Empresa',
+        icon: 'pi pi-building',
+        route: '/admin/company-settings',
+        permission: 'admin.view',
       }
     ]
   },
@@ -239,6 +245,12 @@ export const MENU_ITEMS: MenuItem[] = [
         label: 'Métodos de Pago',
         icon: 'pi pi-wallet',
         route: '/sales/payment-methods',
+        permission: 'payment-methods.manage',
+      },
+      {
+        label: 'Cuentas Bancarias',
+        icon: 'pi pi-credit-card',
+        route: '/sales/bank-accounts',
         permission: 'payment-methods.manage',
       }
     ]
