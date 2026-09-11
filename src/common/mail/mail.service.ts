@@ -7,12 +7,14 @@ export class MailService {
   private transporter: nodemailer.Transporter;
 
   constructor(private readonly configService: ConfigService) {
-    const host = this.configService.get<string>('MAIL_HOST');
-    const port = Number(this.configService.get<number>('MAIL_PORT'));
+    const host = this.configService.get<string>('MAIL_HOST') || 'smtp.gmail.com';
+    const port = parseInt(this.configService.get<string>('MAIL_PORT') || '465', 10);
     const user = this.configService.get<string>('MAIL_USER');
-    const pass = this.configService.get<string>('MAIL_PASS');
+    const rawPass = this.configService.get<string>('MAIL_PASS') || '';
+    const pass = rawPass.replace(/\s+/g, ''); // Quitar cualquier espacio en blanco accidental
 
     this.transporter = nodemailer.createTransport({
+      service: host.includes('gmail') ? 'gmail' : undefined,
       host,
       port,
       secure: port === 465,

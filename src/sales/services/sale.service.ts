@@ -1211,7 +1211,7 @@ export class SaleService {
               parameters: [
                 { type: 'text', text: customerName },
                 { type: 'text', text: sale.invoiceNumber },
-                { type: 'text', text: `Q${Number(sale.total).toFixed(2)}` },
+                { type: 'text', text: `${Number(sale.total).toFixed(2)}` },
               ],
             },
           ],
