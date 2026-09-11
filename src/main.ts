@@ -32,9 +32,14 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
 
   app.enableCors({
-    origin: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: false,
+    origin: [
+      'https://pos-systemfront.seenode.app',
+      'http://localhost:4200',
+      'http://localhost:3000',
+    ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type,Accept,Authorization',
+    credentials: true,
   });
 
   const port = process.env.PORT || 3000;

@@ -1191,7 +1191,7 @@ export class SaleService {
         template: {
           name: 'envio_ticket_pos',
           language: {
-            code: 'es',
+            code: 'es_MX',
           },
           components: [
             {
