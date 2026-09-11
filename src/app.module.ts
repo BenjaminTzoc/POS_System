@@ -33,7 +33,7 @@ import { SettingsModule } from './settings/settings.module';
         database: configService.get('DB_NAME', 'sistema-inventario'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: true,
-        logging: true,
+        logging: configService.get('DB_LOGGING') === 'true' ? true : ['error'],
         ssl: configService.get('DB_SSL') === 'true',
         extra: configService.get('DB_SSL') === 'true' ? {
           ssl: {
