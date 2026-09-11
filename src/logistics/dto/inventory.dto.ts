@@ -1,4 +1,4 @@
-import { IsOptional, IsNotEmpty, IsUUID, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, IsArray, ValidateNested, ArrayMinSize } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { UnitResponseDto } from '.';
@@ -27,6 +27,40 @@ export class CreateInventoryDto {
   @Min(0)
   maxStock?: number;
 }
+
+export class BulkCreateInventoryItemDto {
+  @IsNotEmpty()
+  @IsUUID()
+  productId: string;
+
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  stock: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minStock?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxStock?: number;
+}
+
+export class BulkCreateInventoryDto {
+  @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Debe incluir al menos un producto en el inventario' })
+  @ValidateNested({ each: true })
+  @Type(() => BulkCreateInventoryItemDto)
+  items: BulkCreateInventoryItemDto[];
+}
+
 
 export class UpdateInventoryDto {
   @IsOptional()

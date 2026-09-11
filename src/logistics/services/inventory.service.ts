@@ -4,7 +4,7 @@ import { Inventory } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { ProductService } from './product.service';
 import { BranchService } from './branch.service';
-import { CreateInventoryDto, InventoryResponseDto, UpdateInventoryDto } from '../dto';
+import { CreateInventoryDto, InventoryResponseDto, UpdateInventoryDto, BulkCreateInventoryDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()
@@ -57,6 +57,92 @@ export class InventoryService {
     const savedInventory = await this.inventoryRepository.save(inventory);
     return this.findOne(savedInventory.id);
   }
+
+  async createBulk(dto: BulkCreateInventoryDto, defaultBranchId?: string): Promise<InventoryResponseDto[]> {
+    const branchId = dto.branchId || defaultBranchId;
+    if (!branchId) {
+      throw new BadRequestException('Debe especificar una sucursal para el registro masivo');
+    }
+
+    let branch;
+    try {
+      branch = await this.branchService.findOne(branchId);
+    } catch (error) {
+      throw new BadRequestException(`La sucursal con ID ${branchId} no existe`);
+    }
+
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('Debe proporcionar al menos un producto para registrar inventario');
+    }
+
+    // Validar duplicados dentro de la misma lista entrante
+    const productIdsInPayload = dto.items.map(i => i.productId);
+    const uniqueProductIds = new Set(productIdsInPayload);
+    if (uniqueProductIds.size !== productIdsInPayload.length) {
+      throw new BadRequestException('Existen productos duplicados en la lista enviada');
+    }
+
+    // Validar límites de stock de cada item
+    for (const [index, item] of dto.items.entries()) {
+      try {
+        this.validateStockLimits(item.stock, item.minStock, item.maxStock);
+      } catch (e) {
+        throw new BadRequestException(`Error en fila ${index + 1}: ${e.message}`);
+      }
+    }
+
+    // Ejecutar en una transacción usando el EntityManager del repositorio
+    const savedInventories = await this.inventoryRepository.manager.transaction(async (transactionalEntityManager) => {
+      const createdEntities: Inventory[] = [];
+
+      for (const item of dto.items) {
+        // Verificar existencia del producto
+        const product = await transactionalEntityManager.getRepository(Inventory).manager.findOne(
+          this.productService['productRepository'].target,
+          { where: { id: item.productId } }
+        ) as any;
+
+        if (!product) {
+          throw new BadRequestException(`El producto con ID ${item.productId} no existe`);
+        }
+
+        // Verificar si ya existe inventario activo para este producto en la sucursal
+        const existingInventory = await transactionalEntityManager.findOne(Inventory, {
+          where: {
+            product: { id: item.productId },
+            branch: { id: branchId },
+            deletedAt: IsNull(),
+          },
+        });
+
+        if (existingInventory) {
+          throw new ConflictException(`Ya existe inventario para el producto '${product.name}' en la sucursal '${branch.name}'`);
+        }
+
+        const newInventory = transactionalEntityManager.create(Inventory, {
+          product: { id: item.productId },
+          branch: { id: branchId },
+          stock: item.stock,
+          minStock: item.minStock || 0,
+          maxStock: item.maxStock || undefined,
+        });
+
+        createdEntities.push(newInventory);
+      }
+
+      return await transactionalEntityManager.save(Inventory, createdEntities);
+    });
+
+    // Retornar los inventarios creados con sus relaciones
+    const ids = savedInventories.map(inv => inv.id);
+    const results = await this.inventoryRepository.find({
+      where: ids.map(id => ({ id })),
+      relations: ['product', 'product.category', 'product.unit', 'branch'],
+    });
+
+    return plainToInstance(InventoryResponseDto, results);
+  }
+
 
   async findAll(branchId?: string): Promise<InventoryResponseDto[]> {
     const queryBuilder = this.inventoryRepository.createQueryBuilder('inventory').leftJoinAndSelect('inventory.product', 'product').leftJoinAndSelect('product.category', 'category').leftJoinAndSelect('product.unit', 'unit').leftJoinAndSelect('inventory.branch', 'branch').where('inventory.deletedAt IS NULL');

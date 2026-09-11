@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards, ForbiddenException, Req } from '@nestjs/common';
 import { InventoryService } from '../services';
-import { CreateInventoryDto, InventoryResponseDto, UpdateInventoryDto } from '../dto';
+import { CreateInventoryDto, InventoryResponseDto, UpdateInventoryDto, BulkCreateInventoryDto } from '../dto';
 import { Public } from 'src/auth/decorators';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User } from 'src/common/decorators/user.decorator';
@@ -10,12 +10,20 @@ import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
+  @Post('bulk')
+  @Public()
+  @HttpCode(HttpStatus.CREATED)
+  createBulk(@Body() dto: BulkCreateInventoryDto): Promise<InventoryResponseDto[]> {
+    return this.inventoryService.createBulk(dto);
+  }
+
   @Post()
   @Public()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateInventoryDto): Promise<InventoryResponseDto> {
     return this.inventoryService.create(dto);
   }
+
 
   @Get()
   @UseGuards(JwtAuthGuard)
