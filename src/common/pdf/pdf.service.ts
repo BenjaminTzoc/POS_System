@@ -12,7 +12,7 @@ export class PdfService {
     const settings = await this.settingService.getSettings();
 
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 40, size: 'letter' });
+      const doc = new PDFDocument({ margin: 35, size: 'letter', bufferPages: true });
       const buffers: Buffer[] = [];
 
       doc.on('data', buffers.push.bind(buffers));
@@ -24,24 +24,25 @@ export class PdfService {
         reject(err);
       });
 
-      // --- Premium Color Palette ---
-      const COLOR_PRIMARY = '#1A273A';      // Deep slate blue for headers
-      const COLOR_SECONDARY = '#3B4A6B';    // Card headers
-      const COLOR_TEXT = '#3E4A62';         // Body text
-      const COLOR_MUTED = '#627CA7';        // Muted label text
-      const COLOR_ACCENT = '#0C8ABC';       // Ocean blue for line accents
-      const COLOR_RUST = '#C24D2C';         // Rust orange for grand total highlight
-      const COLOR_BG_LIGHT = '#F4F7FC';     // Light card fill
-      const COLOR_BORDER = '#DAEAF7';       // Elegant borders
+      // --- Color Palette matching UI ---
+      const COLOR_PRIMARY = '#0F172A';      // Slate 900
+      const COLOR_TITLE = '#1E3A8A';        // Blue 900
+      const COLOR_BLUE_BG = '#EFF6FF';      // Blue 50
+      const COLOR_BLUE_BORDER = '#BFDBFE';  // Blue 200
+      const COLOR_BLUE_TEXT = '#1E40AF';    // Blue 800
+      const COLOR_CARD_BG = '#F8FAFC';      // Slate 50
+      const COLOR_CARD_BORDER = '#E2E8F0';  // Slate 200
+      const COLOR_TEXT_MUTED = '#64748B';   // Slate 500
+      const COLOR_TEXT_DARK = '#334155';    // Slate 700
+      const COLOR_BORDER = '#F1F5F9';       // Slate 100
       const COLOR_WHITE = '#FFFFFF';
+      const COLOR_PURPLE_BG = '#FAF5FF';    // Purple 50
+      const COLOR_PURPLE_BORDER = '#F3E8FF';// Purple 100
+      const COLOR_PURPLE_TEXT = '#7C3AED';  // Purple 600
 
-      // --- 1. Top Decorative Bar ---
-      doc.rect(0, 0, 612, 8).fill(COLOR_PRIMARY);
+      let currentY = 20;
 
-      // --- 2. Logo / Header Column Setup ---
-      let headerY = 25;
-
-      // Try to find the logo in several potential locations
+      // --- 1. Logo / Header Section ---
       let logoPath = '';
       const potentialLogoPaths = [
         join(process.cwd(), 'src/common/pdf/logo.png'),
@@ -57,100 +58,237 @@ export class PdfService {
         }
       }
 
-      if (logoPath) {
-        try {
-          doc.image(logoPath, 40, headerY, { width: 110 });
-          // Company settings info next to logo (No redundant company name title)
-          doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
-          doc.text(settings.address, 165, headerY + 10, { width: 220 });
-          doc.text(`Tel: ${settings.phone}`, 165, doc.y + 2, { width: 220 });
-          doc.text(`NIT: ${settings.nit}`, 165, doc.y + 2, { width: 220 });
-        } catch (e) {
-          doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(22).text(settings.companyName, 40, headerY);
-          doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(9).text('Carnes y Embutidos', 40, headerY + 24);
+      const drawHeader = (startY: number) => {
+        let y = startY;
+        const logoWidth = 70;
+        const companyX = 35 + logoWidth + 14;
+        const companyBoxWidth = 230;
+
+        const infoLines: string[] = [];
+        if (settings.address) infoLines.push(settings.address);
+        if (settings.phone) infoLines.push(`Tel: ${settings.phone}`);
+        if (settings.nit) infoLines.push(`NIT: ${settings.nit}`);
+
+        const fontSize = 8.5;
+        const lineHeight = 15.5;
+
+        // Altura ocupada por todo el bloque de texto
+        const textBlockHeight =
+          infoLines.length > 0
+            ? fontSize + (infoLines.length - 1) * lineHeight
+            : 0;
+
+        let renderedLogoHeight = 50;
+
+        if (logoPath) {
+          try {
+            const logoImage = (doc as any).openImage(logoPath);
+            renderedLogoHeight = logoWidth * (logoImage.height / logoImage.width);
+
+            const textStartY =
+              y + (renderedLogoHeight - textBlockHeight) / 2;
+
+            doc.image(logoImage, 35, y, {
+              width: logoWidth,
+            });
+
+            doc
+              .fillColor(COLOR_TEXT_MUTED)
+              .font('Helvetica')
+              .fontSize(fontSize);
+
+            let lineY = textStartY;
+            infoLines.forEach((line) => {
+              doc.text(line, companyX, lineY, {
+                width: companyBoxWidth,
+                lineBreak: false,
+                ellipsis: true,
+              });
+              lineY += lineHeight;
+            });
+          } catch (e) {
+            doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(14).text(settings.companyName || 'CABEN', 35, y);
+            doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(fontSize);
+            let lineY = y + 18;
+            infoLines.forEach(line => {
+              doc.text(line, 35, lineY, { width: 280 });
+              lineY += lineHeight;
+            });
+          }
+        } else {
+          doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(14).text(settings.companyName || 'CABEN', 35, y);
+          doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(fontSize);
+          let lineY = y + 18;
+          infoLines.forEach(line => {
+            doc.text(line, 35, lineY, { width: 280 });
+            lineY += lineHeight;
+          });
         }
-      } else {
-        doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(22).text(settings.companyName, 40, headerY);
-        doc.fillColor(COLOR_MUTED).font('Helvetica').fontSize(9).text('Carnes y Embutidos', 40, headerY + 24);
+
+        // Right Side Header (Title & Badge) - Centrado vertical respecto al logo
+        const titleFontSize = 16;
+        const badgeHeight = 18;
+        const rightGap = 5; // Separación entre título y badge
+        const rightBlockHeight = titleFontSize + rightGap + badgeHeight;
+        const rightStartY = y + (renderedLogoHeight - rightBlockHeight) / 2;
+
+        doc.fillColor(COLOR_TITLE).font('Helvetica-Bold').fontSize(titleFontSize).text('NOTA DE CARGO', 360, rightStartY, { align: 'right', width: 217 });
+        
+        const badgeY = rightStartY + titleFontSize + rightGap;
+        const badgeWidth = 100;
+        const badgeX = 577 - badgeWidth;
+        const badgeFontSize = 8.5;
+        const badgeTextY = badgeY + (badgeHeight - badgeFontSize) / 2 + 1.2; // Bajado para compensar baseline y centrar visualmente
+        doc.roundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 4).fillAndStroke(COLOR_BLUE_BG, COLOR_BLUE_BORDER);
+        doc.fillColor(COLOR_BLUE_TEXT).font('Helvetica-Bold').fontSize(badgeFontSize).text(`Nº: ${sale.invoiceNumber}`, badgeX, badgeTextY, { align: 'center', width: badgeWidth });
+
+        y = y + Math.max(renderedLogoHeight, 48) + 12;
+
+        // --- Divider Line ---
+        doc.moveTo(35, y).lineTo(577, y).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
+        y += 18;
+
+        return y;
+      };
+
+      currentY = drawHeader(currentY);
+
+      // --- 2. Information Section (2 Columns Card) ---
+      const infoBoxY = currentY;
+
+      const customerName = (sale.customer?.name || sale.guestCustomer?.name || 'Consumidor Final').trim();
+      const customerNit = (sale.customer?.nit || sale.guestCustomer?.nit || 'C/F').trim();
+      const customerPhone = (sale.customer?.phone || sale.guestCustomer?.phone || '').trim();
+      const customerAddress = (sale.customer?.address || sale.guestCustomer?.address || '').trim();
+
+      const dateObj = new Date(sale.date);
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const dateString = `${day}/${month}/${year} ${hours}:${minutes}`;
+
+      const statusMap: Record<string, string> = {
+        pending: 'Pendiente',
+        confirmed: 'Confirmado',
+        preparing: 'En preparación',
+        ready_for_pickup: 'Listo para recoger',
+        out_for_delivery: 'En camino',
+        delivered: 'Entregado',
+        partially_delivered: 'Entrega parcial',
+        cancelled: 'Cancelado',
+        on_hold: 'En espera',
+      };
+      const statusLabel = statusMap[sale.status] || sale.status;
+
+      // Calcular altura requerida de la columna de cliente (soporte multilínea para dirección/nombre)
+      doc.font('Helvetica').fontSize(8.5);
+      const colWidth = 235;
+      let leftColHeight = 24 + 13 + 13; // header + Nombre + NIT
+      if (customerPhone) leftColHeight += 13;
+      if (customerAddress) {
+        leftColHeight += Math.max(13, doc.heightOfString(`Dirección: ${customerAddress}`, { width: colWidth }));
       }
 
-      // Right Column: Badge & Metadata
-      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(20).text('NOTA DE CARGO', 340, headerY, { align: 'right', width: 232 });
+      let rightColHeight = 24 + 13 + 13; // header + Fecha + Estado
+      if (sale.branch) {
+        rightColHeight += Math.max(13, doc.heightOfString(`Sucursal: ${sale.branch.name}`, { width: colWidth }));
+      }
 
-      // Badge / Pill
-      const badgeY = headerY + 26;
-      doc.roundedRect(397, badgeY, 175, 24, 4).fill(COLOR_BORDER);
-      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(11).text(sale.invoiceNumber, 397, badgeY + 6, { align: 'center', width: 175 });
+      const dynamicBoxHeight = Math.max(85, Math.max(leftColHeight, rightColHeight) + 12);
+      doc.roundedRect(35, infoBoxY, 542, dynamicBoxHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
 
-      // Dates and Metadata
-      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
-      const dateString = new Date(sale.date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      // Columna 1: Información del cliente
+      doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica-Bold').fontSize(8).text('INFORMACIÓN DEL CLIENTE', 48, infoBoxY + 10);
       
-      doc.text(`Fecha de Emisión: ${dateString}`, 340, badgeY + 34, { align: 'right', width: 232 });
-      doc.text(`Estado: ${sale.status}`, 340, doc.y, { align: 'right', width: 232 });
+      let clientY = infoBoxY + 24;
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLOR_TEXT_DARK).text('Nombre: ', 48, clientY, { continued: true });
+      doc.font('Helvetica').text(customerName);
+      clientY += 13;
 
-      // --- 3. Divider ---
-      const dividerY = 175;
-      doc.moveTo(40, dividerY).lineTo(572, dividerY).strokeColor(COLOR_BORDER).lineWidth(1).stroke();
+      doc.font('Helvetica-Bold').text('NIT: ', 48, clientY, { continued: true });
+      doc.font('Helvetica').text(customerNit);
+      clientY += 13;
 
-      // --- 4. Customer Information Card ---
-      const customerY = 188;
-      doc.roundedRect(40, customerY, 532, 78, 4).fill(COLOR_BG_LIGHT);
+      if (customerPhone) {
+        doc.font('Helvetica-Bold').text('Teléfono: ', 48, clientY, { continued: true });
+        doc.font('Helvetica').text(customerPhone);
+        clientY += 13;
+      }
+
+      if (customerAddress) {
+        doc.font('Helvetica-Bold');
+        const addressLabelWidth = doc.widthOfString('Dirección: ');
+        doc.text('Dirección: ', 48, clientY);
+        doc.font('Helvetica').text(customerAddress, 48 + addressLabelWidth + 3.5, clientY, {
+          width: colWidth - addressLabelWidth - 3.5,
+          lineBreak: true,
+        });
+        clientY = Math.max(clientY + 13, doc.y + 2);
+      }
+
+      // Columna 2: Detalles de la emisión
+      doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica-Bold').fontSize(8).text('DETALLES DE LA EMISIÓN', 315, infoBoxY + 10);
       
-      const customerName = sale.customer ? sale.customer.name : sale.guestCustomer?.name || 'Consumidor Final';
-      const customerNit = sale.customer ? sale.customer.nit : sale.guestCustomer?.nit || 'C/F';
-      const customerAddress = sale.customer ? sale.customer.address : sale.guestCustomer?.address || 'Ciudad';
-      const customerEmail = sale.customer ? sale.customer.email : sale.guestCustomer?.email || 'N/A';
-      const customerPhone = sale.customer ? sale.customer.phone : sale.guestCustomer?.phone || 'N/A';
+      let emissionY = infoBoxY + 24;
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLOR_TEXT_DARK).text('Fecha de Emisión: ', 315, emissionY, { continued: true });
+      doc.font('Helvetica').text(dateString);
+      emissionY += 13;
 
-      // Left Column inside Customer Card
-      doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8).text('INFORMACIÓN DEL CLIENTE', 52, customerY + 8);
-      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(11).text(customerName, 52, customerY + 20, { width: 240, ellipsis: true });
-      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(9);
-      doc.text(`Dirección: ${customerAddress}`, 52, customerY + 36, { width: 240, height: 26, ellipsis: true });
+      if (sale.branch) {
+        doc.font('Helvetica-Bold');
+        const branchLabelWidth = doc.widthOfString('Sucursal: ');
+        doc.text('Sucursal: ', 315, emissionY);
+        doc.font('Helvetica').text(sale.branch.name, 315 + branchLabelWidth + 3.5, emissionY, {
+          width: colWidth - branchLabelWidth - 3.5,
+          lineBreak: true,
+        });
+        emissionY = Math.max(emissionY + 13, doc.y + 2);
+      }
 
-      // Right Column inside Customer Card
-      doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8).text('DETALLES DE CONTACTO', 320, customerY + 8);
-      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(9);
-      doc.text(`NIT / ID: ${customerNit}`, 320, customerY + 20);
-      doc.text(`Teléfono: ${customerPhone}`, 320, customerY + 33);
-      doc.text(`Email: ${customerEmail}`, 320, customerY + 46, { width: 220, ellipsis: true });
+      doc.font('Helvetica-Bold').text('Estado: ', 315, emissionY, { continued: true });
+      doc.font('Helvetica').text(statusLabel);
+      emissionY += 13;
 
-      // --- 5. Table of Products ---
-      let currentY = 280;
+      currentY = infoBoxY + dynamicBoxHeight + 15;
 
-      // Table Header Draw Function
+      // --- 3. Items Table ---
       const drawTableHeader = (y: number) => {
-        doc.roundedRect(40, y, 532, 24, 2).fill(COLOR_PRIMARY);
-        doc.fillColor(COLOR_WHITE).font('Helvetica-Bold').fontSize(8.5);
-        doc.text('CÓDIGO', 50, y + 7.5, { width: 70 });
-        doc.text('NOMBRE', 130, y + 7.5, { width: 190 });
-        doc.text('PRECIO Q.', 330, y + 7.5, { width: 75, align: 'right' });
-        doc.text('CANTIDAD', 415, y + 7.5, { width: 70, align: 'right' });
-        doc.text('TOTAL Q.', 495, y + 7.5, { width: 70, align: 'right' });
+        doc.roundedRect(35, y, 542, 22, 3).fill(COLOR_PRIMARY);
+        doc.fillColor(COLOR_WHITE).font('Helvetica-Bold').fontSize(8);
+        doc.text('CÓDIGO', 45, y + 6.5, { width: 75 });
+        doc.text('NOMBRE', 125, y + 6.5, { width: 200 });
+        doc.text('PRECIO Q.', 330, y + 6.5, { width: 75, align: 'right' });
+        doc.text('CANTIDAD', 415, y + 6.5, { width: 70, align: 'right' });
+        doc.text('TOTAL Q.', 495, y + 6.5, { width: 72, align: 'right' });
       };
 
       drawTableHeader(currentY);
-      currentY += 24;
+      currentY += 22;
 
-      // Group Details by Product
+      // Agrupar items exactamente como en la plantilla Angular
       const groups: {
         productId: string;
         productName: string;
         sku: string;
+        unitAbbr: string;
+        unitPrice: number;
         items: any[];
         totalQuantity: number;
         totalAmount: number;
       }[] = [];
 
-      sale.details.forEach((detail) => {
+      (sale.details || []).forEach((detail) => {
         const prodId = detail.product?.id || '';
         let group = groups.find((g) => g.productId === prodId);
         if (!group) {
           group = {
             productId: prodId,
             productName: detail.product?.name || 'Producto',
-            sku: detail.product?.sku || '',
+            sku: detail.product?.sku || 'S/C',
+            unitAbbr: detail.product?.unit?.abbreviation || '',
+            unitPrice: Number(detail.unitPrice || 0),
             items: [],
             totalQuantity: 0,
             totalAmount: 0,
@@ -162,114 +300,146 @@ export class PdfService {
         group.totalAmount += Number(detail.lineTotal || 0);
       });
 
-      // Render rows
       groups.forEach((group) => {
-        // Render each weigh item
         group.items.forEach((item) => {
-          if (currentY > 700) {
+          if (currentY > 670) {
             doc.addPage();
-            doc.rect(0, 0, 612, 8).fill(COLOR_PRIMARY);
-            currentY = 40;
+            currentY = drawHeader(20);
             drawTableHeader(currentY);
-            currentY += 24;
+            currentY += 22;
           }
 
-          doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
-          doc.text(group.sku, 50, currentY + 6, { width: 70 });
+          doc.fillColor(COLOR_TEXT_DARK).font('Helvetica').fontSize(8.5);
+          doc.text(group.sku, 45, currentY + 7.5, { width: 75, ellipsis: true });
           
-          let discountStr = '';
+          let discountText = '';
           if (Number(item.discountAmount) > 0) {
-            discountStr = `\n(Desc: -Q${Number(item.discountAmount).toFixed(2)})`;
+            discountText = ` (Desc: -Q${Number(item.discountAmount).toFixed(2)})`;
           }
-          doc.text(`${group.productName}${discountStr}`, 130, currentY + 6, { width: 190 });
+          doc.text(`${group.productName}${discountText}`, 125, currentY + 7.5, { width: 200, ellipsis: true });
           
-          doc.text(`Q${Number(item.unitPrice).toFixed(2)}`, 330, currentY + 6, { width: 75, align: 'right' });
-          doc.text(Number(item.quantity).toFixed(2), 415, currentY + 6, { width: 70, align: 'right' });
-          
-          doc.font('Helvetica-Bold').fillColor(COLOR_PRIMARY);
-          doc.text(`Q${Number(item.lineTotal).toFixed(2)}`, 495, currentY + 6, { width: 70, align: 'right' });
+          doc.text(`Q${Number(item.unitPrice).toFixed(2)}`, 330, currentY + 7.5, { width: 75, align: 'right' });
+          const qtyText = group.unitAbbr
+            ? `${Number(item.quantity).toFixed(2)} ${group.unitAbbr}`
+            : Number(item.quantity).toFixed(2);
+          doc.text(qtyText, 415, currentY + 7.5, { width: 70, align: 'right' });
+          doc.text(`Q${Number(item.lineTotal).toFixed(2)}`, 495, currentY + 7.5, { width: 72, align: 'right' });
 
-          doc.moveTo(40, currentY + 22).lineTo(572, currentY + 22).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
-          currentY += 22;
+          doc.moveTo(35, currentY + 24).lineTo(577, currentY + 24).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+          currentY += 24;
         });
 
-        // Render subtotal if more than 1 item
+        // Subtotal de grupo si tiene más de 1 pesaje
         if (group.items.length > 1) {
-          if (currentY > 700) {
+          if (currentY > 670) {
             doc.addPage();
-            doc.rect(0, 0, 612, 8).fill(COLOR_PRIMARY);
-            currentY = 40;
+            currentY = drawHeader(20);
             drawTableHeader(currentY);
-            currentY += 24;
+            currentY += 22;
           }
 
           doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(8.5);
-          doc.text(group.totalQuantity.toFixed(2), 415, currentY + 5.5, { width: 70, align: 'right' });
-          doc.text(`Q${group.totalAmount.toFixed(2)}`, 495, currentY + 5.5, { width: 70, align: 'right' });
+          const totalQtyText = group.unitAbbr
+            ? `${group.totalQuantity.toFixed(2)} ${group.unitAbbr}`
+            : group.totalQuantity.toFixed(2);
+          doc.text(totalQtyText, 415, currentY + 5.5, { width: 70, align: 'right' });
+          doc.text(`Q${group.totalAmount.toFixed(2)}`, 495, currentY + 5.5, { width: 72, align: 'right' });
 
-          doc.moveTo(40, currentY + 20).lineTo(572, currentY + 20).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
-          currentY += 20;
+          doc.moveTo(415, currentY + 20).lineTo(572, currentY + 20).strokeColor('#CBD5E1').lineWidth(0.5).dash(2, { space: 2 }).stroke().undash();
+          currentY += 22;
         }
-
-        currentY += 5; // spacing between product groups
       });
 
-      // --- 6. Totals and Payments Area ---
-      if (currentY > 580) {
+      // --- 4. Totals and Payments Area ---
+      if (currentY > 560) {
         doc.addPage();
-        doc.rect(0, 0, 612, 8).fill(COLOR_PRIMARY);
-        currentY = 40;
+        currentY = drawHeader(20);
       }
 
       currentY += 15;
-      const startTotalsY = currentY;
+      const startBottomY = currentY;
 
-      // Left Side: Payments
+      // Izquierda: Detalle de Pagos
       if (sale.payments && sale.payments.length > 0) {
-        doc.roundedRect(40, currentY, 250, 110, 4).fill('#FAF5FF').strokeColor('#F3E8FF').lineWidth(1).stroke();
-        doc.fillColor('#7C3AED').font('Helvetica-Bold').fontSize(8.5).text('DETALLE DE PAGOS', 52, currentY + 8);
+        const payBoxWidth = 260;
+        const payBoxHeight = Math.max(75, 28 + sale.payments.length * 20);
+        doc.roundedRect(35, startBottomY, payBoxWidth, payBoxHeight, 6).fillAndStroke(COLOR_PURPLE_BG, COLOR_PURPLE_BORDER);
+        doc.fillColor(COLOR_PURPLE_TEXT).font('Helvetica-Bold').fontSize(8).text('DETALLE DE PAGOS', 47, startBottomY + 9);
 
-        let payY = currentY + 22;
+        let pY = startBottomY + 23;
         sale.payments.forEach((p) => {
-          doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8.5);
-          doc.text(p.paymentMethod?.name || 'Pago', 52, payY, { width: 120 });
-          doc.font('Helvetica-Bold').text(`Q${Number(p.amount).toFixed(2)}`, 180, payY, { width: 100, align: 'right' });
-          payY += 15;
+          doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5);
+          doc.text(p.paymentMethod?.name || 'Pago', 47, pY, { width: 130 });
+          doc.text(`Q${Number(p.amount).toFixed(2)}`, 175, pY, { width: 110, align: 'right' });
+
+          // Banco o referencia si existen
+          let refText = '';
+          if (p.bankAccount) {
+            refText = `${p.bankAccount.bankName} - ${p.bankAccount.accountNumber}`;
+          }
+          if (p.referenceNumber) {
+            refText = refText ? `${refText} | Ref: ${p.referenceNumber}` : `Ref: ${p.referenceNumber}`;
+          }
+          if (refText) {
+            pY += 11;
+            doc.fillColor(COLOR_PURPLE_TEXT).font('Helvetica').fontSize(7.5).text(refText, 47, pY, { width: 240, ellipsis: true });
+          }
+
+          pY += 14;
         });
       }
 
-      // Right Side: Totals block
-      const rightX = 320;
-      doc.roundedRect(rightX, currentY, 252, 110, 4).fill(COLOR_BG_LIGHT).strokeColor(COLOR_BORDER).lineWidth(1).stroke();
+      // Derecha: Totales
+      const hasDiscount = Number(sale.discountAmount || 0) > 0;
+      const hasTax = Number(sale.taxAmount || 0) > 0;
+      let extraLinesCount = 0;
+      if (hasDiscount) extraLinesCount++;
+      if (hasTax) extraLinesCount++;
 
-      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(9);
-      doc.text('Subtotal:', rightX + 12, currentY + 12, { width: 120 });
-      doc.text(`Q${Number(sale.subtotal).toFixed(2)}`, rightX + 140, currentY + 12, { width: 100, align: 'right' });
+      const totalsBoxWidth = 207;
+      const totalsBoxX = 577 - totalsBoxWidth; // 370
+      const totalsBoxHeight = 46 + extraLinesCount * 13.5;
+      doc.roundedRect(totalsBoxX, startBottomY, totalsBoxWidth, totalsBoxHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
 
-      let offset = 27;
-      if (Number(sale.discountAmount) > 0) {
-        doc.text('Descuento:', rightX + 12, currentY + offset, { width: 120 });
-        doc.text(`-Q${Number(sale.discountAmount).toFixed(2)}`, rightX + 140, currentY + offset, { width: 100, align: 'right' });
-        offset += 15;
+      let tY = startBottomY + 8;
+      const labelX = totalsBoxX + 10;
+      const valueX = totalsBoxX + 90;
+      const valueWidth = totalsBoxWidth - 90 - 10;
+
+      doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5).text('Subtotal:', labelX, tY);
+      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica').fontSize(8.5).text(`Q${Number(sale.subtotal).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
+      tY += 13.5;
+
+      if (hasDiscount) {
+        doc.fillColor(COLOR_TEXT_MUTED).text('Descuento:', labelX, tY);
+        doc.fillColor('#DC2626').text(`-Q${Number(sale.discountAmount).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
+        tY += 13.5;
       }
 
-      if (Number(sale.taxAmount) > 0) {
-        doc.text('Impuestos:', rightX + 12, currentY + offset, { width: 120 });
-        doc.text(`Q${Number(sale.taxAmount).toFixed(2)}`, rightX + 140, currentY + offset, { width: 100, align: 'right' });
-        offset += 15;
+      if (hasTax) {
+        doc.fillColor(COLOR_TEXT_MUTED).text('Impuestos:', labelX, tY);
+        doc.fillColor(COLOR_TEXT_DARK).text(`Q${Number(sale.taxAmount).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
+        tY += 13.5;
       }
 
-      doc.moveTo(rightX + 12, currentY + offset).lineTo(rightX + 240, currentY + offset).strokeColor(COLOR_BORDER).lineWidth(1).stroke();
-      offset += 8;
+      doc.moveTo(totalsBoxX + 10, tY).lineTo(totalsBoxX + totalsBoxWidth - 10, tY).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
+      tY += 7;
 
-      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(11);
-      doc.text('TOTAL:', rightX + 12, currentY + offset, { width: 120 });
-      doc.text(`Q${Number(sale.total).toFixed(2)}`, rightX + 140, currentY + offset, { width: 100, align: 'right' });
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(10.5).text('TOTAL:', labelX, tY);
+      doc.text(`Q${Number(sale.total).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
 
-      // --- Footer ---
-      doc.fillColor(COLOR_MUTED).font('Helvetica-Bold').fontSize(8.5).text('¡Gracias por su preferencia!', 40, 710, { align: 'center', width: 532 });
-      doc.fillColor(COLOR_TEXT).font('Helvetica').fontSize(8).text('Control Interno - No válido como Factura Tributaria', 40, 725, { align: 'center', width: 532 });
-      doc.fontSize(7.5).text('Documento para validación y conciliación de cargos', 40, 737, { align: 'center', width: 532 });
+      // --- 5. Render Fixed Footer on all pages ---
+      const range = doc.bufferedPageRange();
+      for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+
+        // Separador gris fijo encima del footer
+        doc.moveTo(35, 700).lineTo(577, 700).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
+
+        doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5).text('¡Gracias por su preferencia!', 35, 712, { align: 'center', width: 542 });
+        doc.fontSize(8).text('Control Interno - No válido como Factura Tributaria', 35, 724, { align: 'center', width: 542 });
+        doc.fontSize(7.5).text('Documento para validación y conciliación de cargos', 35, 742, { align: 'center', width: 542 });
+      }
 
       doc.end();
     });
@@ -277,7 +447,7 @@ export class PdfService {
 
   async generateQuotationPdf(quotation: Quotation): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      const doc = new PDFDocument({ margin: 40, size: 'letter' });
       const buffers: Buffer[] = [];
 
       doc.on('data', buffers.push.bind(buffers));

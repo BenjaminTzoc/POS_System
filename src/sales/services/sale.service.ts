@@ -356,6 +356,7 @@ export class SaleService {
         date: dto.date ? new Date(dto.date) : new Date(),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         status: dto.finalStatus || SaleStatus.DELIVERED,
+        deliveredAt: (dto.finalStatus === SaleStatus.DELIVERED || !dto.finalStatus) ? new Date() : null,
         notes: dto.notes || null,
         customer: dto.customerId ? { id: dto.customerId } : undefined,
         guestCustomer: dto.guestCustomer ?? undefined,
@@ -633,6 +634,9 @@ export class SaleService {
         payments: {
           createdAt: 'DESC',
         },
+        details: {
+          createdAt: 'ASC',
+        },
       },
     });
 
@@ -749,6 +753,7 @@ export class SaleService {
     }
 
     sale.status = SaleStatus.DELIVERED;
+    sale.deliveredAt = new Date();
     await this.saleRepository.save(sale);
     return this.findOne(id);
   }
@@ -1043,6 +1048,20 @@ export class SaleService {
     this.saleGateway.broadcastNextInvoiceNumber(nextNumber);
 
     return { nextNumber };
+  }
+
+  async generatePdf(id: string): Promise<{ buffer: Buffer; invoiceNumber: string }> {
+    const sale = await this.saleRepository.findOne({
+      where: { id },
+      relations: ['customer', 'details', 'details.product', 'branch', 'payments', 'payments.paymentMethod'],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    const buffer = await this.pdfService.generateInvoicePdf(sale);
+    return { buffer, invoiceNumber: sale.invoiceNumber };
   }
 
   async sendSaleEmail(id: string, pdfBase64?: string): Promise<{ message: string }> {

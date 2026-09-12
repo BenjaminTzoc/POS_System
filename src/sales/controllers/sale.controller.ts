@@ -1,8 +1,8 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { SaleService } from '../services';
 import { CreateSaleDto, QuickSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { UpdateDetailStatusDto } from '../dto/update-detail-status.dto';
-import { SaleStatus } from '../entities';
 import { Permissions, Public } from 'src/auth/decorators';
 import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 
@@ -100,25 +100,9 @@ export class SaleController {
   }
 
   @Get('customer/:customerId')
+  @Permissions('orders.view')
   findByCustomer(@Param('customerId', ParseUUIDPipe) customerId: string): Promise<SaleResponseDto[]> {
     return this.saleService.findByCustomer(customerId);
-  }
-
-  @Get('status/:status')
-  findByStatus(@Param('status') status: SaleStatus): Promise<SaleResponseDto[]> {
-    return this.saleService.findByStatus(status);
-  }
-
-  @Get('kanban/preparation')
-  @Permissions('orders.view')
-  @HttpCode(HttpStatus.OK)
-  getPreparationWorklist(@Query('areaId', ParseUUIDPipe) areaId: string, @Query('branchId') branchId?: string) {
-    return this.saleService.findAll({
-      areaId,
-      branchId,
-      status: SaleStatus.CONFIRMED,
-      groupBy: 'preparationStatus',
-    });
   }
 
   @Get('daily/:date')
@@ -127,16 +111,31 @@ export class SaleController {
   }
 
   @Get(':id')
+  @Permissions('orders.view')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<SaleResponseDto> {
     return this.saleService.findOne(id);
   }
 
+  @Get(':id/pdf')
+  @Public()
+  async getPdf(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+    const { buffer, invoiceNumber } = await this.saleService.generatePdf(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Factura_${invoiceNumber}.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
+
   @Put(':id')
+  @Permissions('orders.update')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSaleDto): Promise<SaleResponseDto> {
     return this.saleService.update(id, dto);
   }
 
   @Delete(':id')
+  @Permissions('orders.cancel')
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
     return this.saleService.remove(id);
@@ -167,3 +166,4 @@ export class SaleController {
     return this.saleService.sendSaleWhatsApp(id, pdfBase64);
   }
 }
+
