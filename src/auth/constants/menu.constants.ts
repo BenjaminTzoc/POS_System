@@ -52,12 +52,12 @@ export const RECURRENT_MENU: MenuItem[] = [
     route: '/sales/cash-history',
     permission: 'cash.view',
   },
-  {
-    label: 'POS Rápido',
-    icon: 'pi pi-desktop',
-    route: '/sales/pos',
-    permission: 'orders.create',
-  },
+  // {
+  //   label: 'POS Rápido',
+  //   icon: 'pi pi-desktop',
+  //   route: '/sales/pos',
+  //   permission: 'orders.create',
+  // },
   {
     label: 'Movimientos de inventario',
     icon: 'pi pi-objects-column',
@@ -85,12 +85,12 @@ export const MENU_ITEMS: MenuItem[] = [
     route: '/dashboard',
     permission: '',
   },
-  {
-    label: 'Venta Rápida',
-    icon: 'pi pi-bolt',
-    route: '/sales/quick-sale',
-    permission: 'orders.create',
-  },
+  // {
+  //   label: 'Venta Rápida',
+  //   icon: 'pi pi-bolt',
+  //   route: '/sales/quick-sale',
+  //   permission: 'orders.create',
+  // },
   {
     label: 'Inventario',
     icon: 'pi pi-box',
