@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import { QuotationService } from '../services/quotation.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User as UserDecorator } from 'src/common/decorators/user.decorator';
@@ -48,8 +48,22 @@ export class QuotationController {
   }
 
   @Post(':id/send-email')
-  async sendEmail(@Param('id', ParseUUIDPipe) id: string, @Body('email') email: string): Promise<{ message: string }> {
-    return this.quotationService.sendQuotationEmail(id, email);
+  @HttpCode(HttpStatus.OK)
+  async sendEmail(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('email') email?: string,
+    @Body('pdfBase64') pdfBase64?: string,
+  ): Promise<{ message: string }> {
+    return this.quotationService.sendQuotationEmail(id, email, pdfBase64);
+  }
+
+  @Post(':id/send-whatsapp')
+  @HttpCode(HttpStatus.OK)
+  async sendWhatsApp(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('pdfBase64') pdfBase64?: string,
+  ): Promise<{ message: string }> {
+    return this.quotationService.sendQuotationWhatsApp(id, pdfBase64);
   }
 
   @Patch(':id/status')

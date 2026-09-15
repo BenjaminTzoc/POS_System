@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Like, Repository } from 'typeorm';
 import {
@@ -319,10 +319,12 @@ export class QuotationService {
     const query = this.quotationRepository
       .createQueryBuilder('q')
       .leftJoinAndSelect('q.customer', 'customer')
+      .leftJoinAndSelect('customer.category', 'customerCategory')
       .leftJoinAndSelect('q.branch', 'branch')
       .leftJoinAndSelect('q.createdBy', 'createdBy')
       .leftJoinAndSelect('q.items', 'items')
       .leftJoinAndSelect('items.product', 'product')
+      .leftJoinAndSelect('product.unit', 'unit')
       .leftJoinAndSelect('q.discounts', 'discounts')
       .leftJoinAndSelect('q.sale', 'sale')
       .where('q.deletedAt IS NULL');
@@ -351,7 +353,17 @@ export class QuotationService {
   async findOne(id: string): Promise<QuotationResponseDto> {
     const quotation = await this.quotationRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['customer', 'branch', 'createdBy', 'items', 'items.product', 'discounts', 'sale'],
+      relations: [
+        'customer',
+        'customer.category',
+        'branch',
+        'createdBy',
+        'items',
+        'items.product',
+        'items.product.unit',
+        'discounts',
+        'sale',
+      ],
     });
 
     if (!quotation) throw new NotFoundException('Cotización no encontrada');
@@ -369,44 +381,16 @@ export class QuotationService {
 
   async convertToSale(id: string, userId: string): Promise<{ saleId: string }> {
     const quotation = await this.quotationRepository.findOne({
-      where: { id, deletedAt: IsNull() },
-      relations: ['customer', 'branch', 'items', 'items.product', 'discounts'],
+      where: { id },
+      relations: ['customer', 'branch', 'items', 'items.product', 'items.product.area', 'discounts'],
     });
 
     if (!quotation) throw new NotFoundException('Cotización no encontrada');
-    if (quotation.status !== QuotationStatus.PENDING) {
-      throw new BadRequestException('Solo se pueden convertir cotizaciones pendientes');
+    if (quotation.status === QuotationStatus.CONVERTED) {
+      throw new BadRequestException('Esta cotización ya ha sido convertida en una orden de venta');
     }
-    if (new Date() > quotation.validUntil) {
-      quotation.status = QuotationStatus.EXPIRED;
-      await this.quotationRepository.save(quotation);
-      throw new BadRequestException('La cotización ha expirado');
-    }
-
-    // 1. Validar stock antes de realizar la conversión
-    const stockErrors: string[] = [];
-    for (const qItem of quotation.items) {
-      const manageStock = qItem.product.manageStock;
-      if (manageStock === false) continue;
-
-      const stockQuery = await this.dataSource
-        .createQueryBuilder()
-        .select(['product.id', 'product.name', 'COALESCE(SUM(inventory.stock), 0) AS current_stock'])
-        .from('products', 'product')
-        .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: quotation.branch.id })
-        .where('product.id = :productId', { productId: qItem.product.id })
-        .andWhere('product.deletedAt IS NULL')
-        .groupBy('product.id')
-        .getRawOne();
-
-      const currentStock = stockQuery ? Number(stockQuery.current_stock || 0) : 0;
-      if (currentStock < qItem.quantity) {
-        stockErrors.push(`Producto "${qItem.product.name}" - Stock insuficiente: solicitado ${qItem.quantity}, disponible ${currentStock}`);
-      }
-    }
-
-    if (stockErrors.length > 0) {
-      throw new BadRequestException({ message: 'Error de stock en los productos', errors: stockErrors });
+    if (quotation.status === QuotationStatus.CANCELLED) {
+      throw new BadRequestException('No se puede convertir una cotización cancelada');
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -416,6 +400,7 @@ export class QuotationService {
     try {
       const invoiceNumber = await this.generateInvoiceNumber();
 
+      // Create Sale
       const sale = queryRunner.manager.create(Sale, {
         invoiceNumber,
         status: SaleStatus.CONFIRMED, // Al ser confirmada se descuenta stock
@@ -478,23 +463,20 @@ export class QuotationService {
         }
       }
 
-      // Map Adjustments (Discounts/Increases)
+      // Map Global Adjustments
       if (quotation.discounts?.length) {
         for (const qDisc of quotation.discounts) {
-          const saleDiscount = queryRunner.manager.create(SaleDiscount, {
-            sale: savedSale,
-            type: qDisc.valueType === QuotationValueType.PERCENTAGE ? 'percent' : 'amount',
-            value: qDisc.value,
-            amountApplied: qDisc.adjustmentType === QuotationAdjustmentType.DISCOUNT ? qDisc.amountApplied : -qDisc.amountApplied,
-            reason: qDisc.reason,
-          });
-          await queryRunner.manager.save(saleDiscount);
+          if (qDisc.adjustmentType === QuotationAdjustmentType.DISCOUNT) {
+            const saleDiscount = queryRunner.manager.create(SaleDiscount, {
+              sale: savedSale,
+              type: qDisc.valueType === QuotationValueType.PERCENTAGE ? 'percent' : 'amount',
+              value: qDisc.value,
+              amountApplied: qDisc.amountApplied,
+              reason: qDisc.reason || 'Descuento transferido desde cotización',
+            });
+            await queryRunner.manager.save(saleDiscount);
+          }
         }
-      }
-
-      // Actualizar estadísticas de compra del cliente
-      if (quotation.customer) {
-        await this.customerService.updatePurchaseStats(quotation.customer.id, sale.total);
       }
 
       quotation.status = QuotationStatus.CONVERTED;
@@ -523,9 +505,11 @@ export class QuotationService {
     dto.taxAmount = Number(q.taxAmount);
     dto.discountAmount = Number(q.discountAmount);
     dto.total = Number(q.total);
+    dto.customer = q.customer as any;
     dto.customerId = q.customer?.id || null;
     dto.customerName = q.customer ? q.customer.name : q.guestCustomer?.name || 'Consumidor Final';
     dto.guestCustomer = q.guestCustomer;
+    dto.branch = q.branch as any;
     dto.branchId = q.branch?.id || '';
     dto.branchName = q.branch?.name || '';
     dto.createdBy = q.createdBy?.name || 'Sistema';
@@ -533,10 +517,11 @@ export class QuotationService {
     dto.saleId = q.sale?.id || null;
     dto.items = (q.items || []).map((item) => ({
       id: item.id,
-      productId: item.product.id,
-      productName: item.product.name,
-      productSku: item.product.sku,
-      productImage: item.product.imageUrl || '',
+      product: item.product as any,
+      productId: item.product?.id,
+      productName: item.product?.name,
+      productSku: item.product?.sku,
+      productImage: item.product?.imageUrl || '',
       quantity: Number(item.quantity),
       unitPrice: Number(item.unitPrice),
       discount: Number(item.discount),
@@ -570,10 +555,136 @@ export class QuotationService {
     return this.pdfService.generateQuotationPdf(quotation);
   }
 
-  async sendQuotationEmail(id: string, email: string): Promise<{ message: string }> {
+  async uploadMediaToMeta(pdfBuffer: Buffer, fileName: string): Promise<string> {
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (!token || !phoneId) {
+      throw new BadRequestException('Las credenciales de WhatsApp no están configuradas');
+    }
+
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
+    formData.append('file', blob, fileName);
+    formData.append('messaging_product', 'whatsapp');
+
+    const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/media`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Meta Media Upload Error (Quotation):', errText);
+      throw new InternalServerErrorException(`Fallo al subir el documento a Meta: ${errText}`);
+    }
+
+    const result = (await response.json()) as { id: string };
+    return result.id;
+  }
+
+  async sendQuotationWhatsApp(id: string, pdfBase64?: string): Promise<{ message: string }> {
     const quotation = await this.quotationRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['customer', 'items', 'items.product'],
+      relations: ['customer', 'branch', 'items', 'items.product', 'discounts'],
+    });
+
+    if (!quotation) {
+      throw new NotFoundException(`Cotización con ID ${id} no encontrada`);
+    }
+
+    const phone = quotation.customer?.phone || quotation.guestCustomer?.phone;
+    if (!phone) {
+      throw new BadRequestException('El cliente no tiene un número de teléfono asociado');
+    }
+
+    let cleanPhone = phone.replace(/\D/g, '');
+    const defaultPrefix = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '502';
+    if (cleanPhone.length === 8) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    } else if (cleanPhone.length > 0 && !cleanPhone.startsWith(defaultPrefix)) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    }
+
+    try {
+      let pdfBuffer: Buffer;
+      if (pdfBase64) {
+        pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      } else {
+        pdfBuffer = await this.pdfService.generateQuotationPdf(quotation);
+      }
+
+      const fileName = `Cotizacion_${quotation.correlative}.pdf`;
+      const mediaId = await this.uploadMediaToMeta(pdfBuffer, fileName);
+
+      const token = process.env.WHATSAPP_TOKEN;
+      const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+      const customerName = quotation.customer?.name || quotation.guestCustomer?.name || 'Cliente';
+
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'template',
+        template: {
+          name: 'envio_ticket_pos',
+          language: {
+            code: 'es_MX',
+          },
+          components: [
+            {
+              type: 'header',
+              parameters: [
+                {
+                  type: 'document',
+                  document: {
+                    id: mediaId,
+                    filename: fileName,
+                  },
+                },
+              ],
+            },
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: customerName },
+                { type: 'text', text: quotation.correlative },
+                { type: 'text', text: `${Number(quotation.total).toFixed(2)}` },
+              ],
+            },
+          ],
+        },
+      };
+
+      const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Meta Send Message Error (Quotation):', errText);
+        throw new InternalServerErrorException(`Fallo al enviar el mensaje de WhatsApp: ${errText}`);
+      }
+
+      return { message: 'WhatsApp enviado exitosamente' };
+    } catch (error) {
+      console.error('Error in sendQuotationWhatsApp:', error);
+      throw error;
+    }
+  }
+
+  async sendQuotationEmail(id: string, email?: string, pdfBase64?: string): Promise<{ message: string }> {
+    const quotation = await this.quotationRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+      relations: ['customer', 'branch', 'items', 'items.product', 'discounts'],
     });
 
     if (!quotation) throw new NotFoundException('Cotización no encontrada');
@@ -584,23 +695,33 @@ export class QuotationService {
       return { message: 'La cotización no tiene un correo electrónico asociado' };
     }
 
-    const pdfBuffer = await this.generatePdf(id);
+    try {
+      let pdfBuffer: Buffer;
+      if (pdfBase64) {
+        pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      } else {
+        pdfBuffer = await this.pdfService.generateQuotationPdf(quotation);
+      }
 
-    const customerName = quotation.customer ? quotation.customer.name : quotation.guestCustomer?.name || 'Cliente';
+      const customerName = quotation.customer ? quotation.customer.name : quotation.guestCustomer?.name || 'Cliente';
 
-    await this.mailService.sendMail(
-      targetEmail,
-      `Cotización ${quotation.correlative} - Sistema POS`,
-      `Estimado(a) ${customerName},\n\nAdjunto encontrará la cotización solicitada.\n\nSaludos,\nEquipo de Ventas`,
-      [
-        {
-          filename: `cotizacion-${quotation.correlative}.pdf`,
-          content: pdfBuffer,
-        },
-      ],
-    );
+      await this.mailService.sendMail(
+        targetEmail,
+        `Cotización ${quotation.correlative} - Sistema POS`,
+        `Estimado(a) ${customerName},\n\nAdjunto encontrará la cotización solicitada correspondiente al número ${quotation.correlative}.\n\nSaludos,\nEquipo de Ventas`,
+        [
+          {
+            filename: `Cotizacion_${quotation.correlative}.pdf`,
+            content: pdfBuffer,
+          },
+        ],
+      );
 
-    return { message: 'Correo enviado exitosamente' };
+      return { message: 'Correo enviado exitosamente' };
+    } catch (error) {
+      console.error('Error in sendQuotationEmail:', error);
+      throw new InternalServerErrorException('Ocurrió un error al procesar o enviar el correo electrónico');
+    }
   }
 
   async generateCorrelative(): Promise<string> {

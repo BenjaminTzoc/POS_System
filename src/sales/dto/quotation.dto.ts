@@ -3,6 +3,8 @@ import { Type, Expose } from 'class-transformer';
 import { QuotationStatus } from '../entities/quotation.entity';
 import { DiscountType } from '../entities/discount-code.entity';
 import { QuotationAdjustmentType, QuotationValueType } from '../entities/quotation-discount.entity';
+import { ProductResponseDto, BranchResponseDto } from 'src/logistics/dto';
+import { CustomerResponseDto } from './customer.dto';
 
 export class CreateQuotationItemDto {
   @IsUUID()
@@ -118,6 +120,10 @@ export class QuotationItemResponseDto {
   id: string;
 
   @Expose()
+  @Type(() => ProductResponseDto)
+  product?: ProductResponseDto;
+
+  @Expose()
   productId: string;
 
   @Expose()
@@ -212,6 +218,10 @@ export class QuotationResponseDto {
   total: number;
 
   @Expose()
+  @Type(() => CustomerResponseDto)
+  customer?: CustomerResponseDto | null;
+
+  @Expose()
   customerId: string | null;
 
   @Expose()
@@ -219,6 +229,10 @@ export class QuotationResponseDto {
 
   @Expose()
   guestCustomer: any;
+
+  @Expose()
+  @Type(() => BranchResponseDto)
+  branch?: BranchResponseDto | null;
 
   @Expose()
   branchId: string;
