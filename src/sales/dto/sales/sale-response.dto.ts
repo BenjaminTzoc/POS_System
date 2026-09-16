@@ -22,6 +22,9 @@ export class SaleResponseDto extends BaseEntity {
   dueDate: Date;
 
   @Expose()
+  billingStartDate?: Date;
+
+  @Expose()
   deliveredAt?: Date;
 
   @Expose()

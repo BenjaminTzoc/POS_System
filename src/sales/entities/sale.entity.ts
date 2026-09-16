@@ -45,6 +45,9 @@ export class Sale extends BaseEntity {
   @Column({ name: 'due_date', type: 'timestamp', nullable: true })
   dueDate: Date | null;
 
+  @Column({ name: 'billing_start_date', type: 'timestamp', nullable: true })
+  billingStartDate?: Date | null;
+
   @Column({ name: 'delivered_at', type: 'timestamp', nullable: true })
   deliveredAt?: Date | null;
 

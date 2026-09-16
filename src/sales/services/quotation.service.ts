@@ -624,13 +624,16 @@ export class QuotationService {
       const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
       const customerName = quotation.customer?.name || quotation.guestCustomer?.name || 'Cliente';
 
+      const validUntilDate = new Date(quotation.validUntil);
+      const validUntilString = `${validUntilDate.getDate().toString().padStart(2, '0')}/${(validUntilDate.getMonth() + 1).toString().padStart(2, '0')}/${validUntilDate.getFullYear()}`;
+
       const payload = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to: cleanPhone,
         type: 'template',
         template: {
-          name: 'envio_ticket_pos',
+          name: 'envio_cotizacion_pos',
           language: {
             code: 'es_MX',
           },
@@ -653,6 +656,7 @@ export class QuotationService {
                 { type: 'text', text: customerName },
                 { type: 'text', text: quotation.correlative },
                 { type: 'text', text: `${Number(quotation.total).toFixed(2)}` },
+                { type: 'text', text: validUntilString },
               ],
             },
           ],

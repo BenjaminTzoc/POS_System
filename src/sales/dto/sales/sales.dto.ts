@@ -20,6 +20,10 @@ export class CreateSaleDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsDateString()
+  billingStartDate?: string;
+
+  @IsOptional()
   @IsBoolean()
   @Transform(({ value }) => {
     if (value === 'true') return true;

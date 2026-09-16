@@ -141,6 +141,7 @@ export class SaleService {
         invoiceNumber: dto.invoiceNumber,
         date: dto.date ? new Date(dto.date) : new Date(),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        billingStartDate: dto.billingStartDate ? new Date(dto.billingStartDate) : null,
         status: SaleStatus.PENDING,
         notes: dto.notes || null,
         customer: dto.customerId ? { id: dto.customerId } : undefined,
@@ -355,6 +356,7 @@ export class SaleService {
         invoiceNumber: dto.invoiceNumber,
         date: dto.date ? new Date(dto.date) : new Date(),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        billingStartDate: dto.billingStartDate ? new Date(dto.billingStartDate) : null,
         status: dto.finalStatus || SaleStatus.DELIVERED,
         deliveredAt: (dto.finalStatus === SaleStatus.DELIVERED || !dto.finalStatus) ? new Date() : null,
         notes: dto.notes || null,
@@ -852,6 +854,7 @@ export class SaleService {
 
       if (dto.date) sale.date = new Date(dto.date);
       if (dto.dueDate !== undefined) sale.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+      if (dto.billingStartDate !== undefined) sale.billingStartDate = dto.billingStartDate ? new Date(dto.billingStartDate) : null;
       if (dto.notes !== undefined) sale.notes = dto.notes;
       if (dto.applyTax !== undefined) sale.applyTax = dto.applyTax;
 
