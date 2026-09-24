@@ -40,6 +40,7 @@ async function bootstrap() {
       'https://pos-systemfront.seenode.app',
       'http://localhost:4200',
       'http://localhost:3000',
+      'http://192.168.0.2:4200',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type,Accept,Authorization',

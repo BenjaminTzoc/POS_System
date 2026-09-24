@@ -1,11 +1,17 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { TripService } from '../services/trip.service';
-import { AddTripItemsDto, CreateTripDto, DeliverSaleItemDto, ReceiveTripReturnDto, ResolveTripIncidentDto, TripResponseDto } from '../dto/trip.dto';
+import {
+  AddTripItemsDto,
+  CreateTripDto,
+  CreateTripIncidentDto,
+  DeliverSaleItemDto,
+  ReceiveTripReturnDto,
+  ResolveTripIncidentDto,
+  TripResponseDto,
+} from '../dto/trip.dto';
 import { ReceiveTransferDto } from '../dto/inventory-transfer.dto';
 import { TripStatus } from '../entities/trip.entity';
-import { Permissions } from 'src/auth/decorators';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { PermissionsGuard } from 'src/auth/guards/permissions.guard';
 import { User } from 'src/common/decorators/user.decorator';
 import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 
@@ -20,10 +26,19 @@ export class TripController {
     return this.tripService.getPendingOperations(branchId);
   }
 
+  @Get('mine')
+  findMine(
+    @Query('status') status?: TripStatus,
+    @Query('date') date?: string,
+    @User() user?: any,
+  ): Promise<TripResponseDto[]> {
+    return this.tripService.findMine(user.id, status, date);
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateTripDto, @User() user: any): Promise<TripResponseDto> {
-    return this.tripService.create(dto, user.id);
+    return this.tripService.create(dto, user);
   }
 
   @Get()
@@ -38,38 +53,39 @@ export class TripController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<TripResponseDto> {
-    return this.tripService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @User() user: any): Promise<TripResponseDto> {
+    return this.tripService.findOne(id, user);
   }
 
   @Post(':id/items')
   addItems(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddTripItemsDto,
+    @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.addItems(id, dto);
+    return this.tripService.addItems(id, dto, user);
   }
 
   @Delete(':id/items/:itemId')
   removeItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('itemId', ParseUUIDPipe) itemId: string,
+    @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.removeItem(id, itemId);
+    return this.tripService.removeItem(id, itemId, user);
   }
 
   @Patch(':id/confirm-departure')
-  confirmDeparture(@Param('id', ParseUUIDPipe) id: string): Promise<TripResponseDto> {
-    return this.tripService.confirmDeparture(id);
+  confirmDeparture(@Param('id', ParseUUIDPipe) id: string, @User() user: any): Promise<TripResponseDto> {
+    return this.tripService.confirmDeparture(id, user);
   }
 
   @Patch(':id/items/:itemId/deliver')
   completeItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body('notes') notes?: string,
   ): Promise<TripResponseDto> {
-    return this.tripService.completeItem(id, itemId, notes);
+    return this.tripService.completeItem(id, itemId);
   }
 
   @Post(':id/items/:itemId/deliver-sale')
@@ -79,7 +95,7 @@ export class TripController {
     @Body() dto: DeliverSaleItemDto,
     @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.deliverSaleItem(id, itemId, dto, user.id);
+    return this.tripService.deliverSaleItem(id, itemId, dto, user);
   }
 
   @Post(':id/items/:itemId/deliver-transfer')
@@ -89,7 +105,7 @@ export class TripController {
     @Body() dto: ReceiveTransferDto,
     @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.deliverTransferItem(id, itemId, dto, user.id);
+    return this.tripService.deliverTransferItem(id, itemId, dto, user);
   }
 
   @Post(':id/returns/:returnId/receive')
@@ -99,7 +115,16 @@ export class TripController {
     @Body() dto: ReceiveTripReturnDto,
     @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.receiveReturn(id, returnId, dto, user.id);
+    return this.tripService.receiveReturn(id, returnId, dto, user);
+  }
+
+  @Post(':id/incidents')
+  createIncident(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTripIncidentDto,
+    @User() user: any,
+  ): Promise<TripResponseDto> {
+    return this.tripService.createIncident(id, dto, user);
   }
 
   @Patch(':id/incidents/:incidentId/resolve')
@@ -109,20 +134,20 @@ export class TripController {
     @Body() dto: ResolveTripIncidentDto,
     @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.resolveIncident(id, incidentId, dto, user.id);
+    return this.tripService.resolveIncident(id, incidentId, dto, user);
   }
 
   @Patch(':id/complete')
-  completeTrip(@Param('id', ParseUUIDPipe) id: string): Promise<TripResponseDto> {
-    return this.tripService.completeTrip(id);
+  completeTrip(@Param('id', ParseUUIDPipe) id: string, @User() user: any): Promise<TripResponseDto> {
+    return this.tripService.completeTrip(id, user);
   }
 
   @Patch(':id/cancel')
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('reason') reason?: string,
+    @User() user?: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.cancel(id, reason);
+    return this.tripService.cancel(id, reason, user);
   }
 }
-

@@ -54,6 +54,11 @@ export class CreateSaleDto {
   notes?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  deliveryAddress?: string;
+
+  @IsOptional()
   @IsUUID()
   customerId: string;
 

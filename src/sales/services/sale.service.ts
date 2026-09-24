@@ -38,6 +38,19 @@ export class SaleService {
     private readonly areaService: AreaService,
   ) {}
 
+  private resolveDeliveryAddress(
+    explicit?: string | null,
+    customer?: { address?: string | null } | null,
+    guest?: { address?: string | null } | null,
+  ): string | null {
+    const written = explicit?.trim();
+    if (written) return written;
+    const fromCustomer = customer?.address?.trim();
+    if (fromCustomer) return fromCustomer;
+    const fromGuest = guest?.address?.trim();
+    return fromGuest || null;
+  }
+
   async create(dto: CreateSaleDto): Promise<SaleResponseDto> {
     if (!dto.invoiceNumber) {
       const { nextNumber } = await this.generateNextInvoiceNumber();
@@ -88,6 +101,8 @@ export class SaleService {
     if (isPreorder && !dto.promisedDeliveryDate) {
       throw new BadRequestException('La preorden requiere fecha de entrega prometida (promisedDeliveryDate)');
     }
+
+    const deliveryAddress = this.resolveDeliveryAddress(dto.deliveryAddress, customer, dto.guestCustomer);
 
     const stockErrors: string[] = [];
 
@@ -186,6 +201,7 @@ export class SaleService {
         status: SaleStatus.PENDING,
         deliveryOtp,
         notes: dto.notes || null,
+        deliveryAddress,
         customer: dto.customerId ? { id: dto.customerId } : undefined,
         guestCustomer: dto.guestCustomer ?? undefined,
         branch: { id: dto.branchId },
@@ -367,6 +383,8 @@ export class SaleService {
 
     if (!dto.details?.length) throw new BadRequestException('La venta debe tener al menos un detalle');
 
+    const deliveryAddress = this.resolveDeliveryAddress(dto.deliveryAddress, customer, dto.guestCustomer);
+
     // 1. Stock Check
     const stockErrors: string[] = [];
     for (const detailDto of dto.details) {
@@ -428,6 +446,7 @@ export class SaleService {
         status: dto.finalStatus || SaleStatus.DELIVERED,
         deliveredAt: (dto.finalStatus === SaleStatus.DELIVERED || !dto.finalStatus) ? new Date() : null,
         notes: dto.notes || null,
+        deliveryAddress,
         customer: dto.customerId ? { id: dto.customerId } : undefined,
         guestCustomer: dto.guestCustomer ?? undefined,
         branch: { id: dto.branchId },
@@ -811,6 +830,7 @@ export class SaleService {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['details', 'details.product', 'customer', 'branch'],
+      relationLoadStrategy: 'query',
     });
 
     if (!sale) {
@@ -1069,6 +1089,22 @@ export class SaleService {
       if (dto.guestCustomer) {
         sale.guestCustomer = dto.guestCustomer;
         sale.customer = null;
+      }
+
+      if (dto.deliveryAddress !== undefined) {
+        let customerForAddress: { address?: string | null } | null = sale.customer as any;
+        if (dto.customerId) {
+          try {
+            customerForAddress = await this.customerService.findOne(dto.customerId);
+          } catch {
+            customerForAddress = sale.customer as any;
+          }
+        }
+        sale.deliveryAddress = this.resolveDeliveryAddress(
+          dto.deliveryAddress,
+          customerForAddress,
+          dto.guestCustomer || sale.guestCustomer,
+        );
       }
 
       const branchId = dto.branchId || sale.branch.id;

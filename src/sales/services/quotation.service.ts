@@ -424,6 +424,11 @@ export class QuotationService {
         applyTax: quotation.applyTax,
         notes: `Convertido desde cotización ${quotation.correlative}. ${quotation.notes || ''}`,
         date: new Date(),
+        deliveryAddress:
+          dto?.deliveryAddress?.trim() ||
+          quotation.customer?.address?.trim() ||
+          quotation.guestCustomer?.address?.trim() ||
+          null,
       });
 
       const savedSale = await queryRunner.manager.save(sale);

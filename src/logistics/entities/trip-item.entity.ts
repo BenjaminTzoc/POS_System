@@ -29,11 +29,11 @@ export class TripItem extends BaseEntity {
   })
   type: TripItemType;
 
-  @ManyToOne(() => InventoryTransfer, { eager: true, nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => InventoryTransfer, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'transfer_id' })
   transfer?: InventoryTransfer | null;
 
-  @ManyToOne(() => Sale, { eager: true, nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => Sale, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'sale_id' })
   sale?: Sale | null;
 

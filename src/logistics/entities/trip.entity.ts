@@ -55,7 +55,7 @@ export class Trip extends BaseEntity {
   @JoinColumn({ name: 'created_by' })
   createdBy?: User | null;
 
-  @OneToMany(() => TripItem, (item) => item.trip, { cascade: true, eager: true })
+  @OneToMany(() => TripItem, (item) => item.trip, { cascade: true })
   items: TripItem[];
 
   @OneToMany(() => TripReturn, (tripReturn) => tripReturn.trip)

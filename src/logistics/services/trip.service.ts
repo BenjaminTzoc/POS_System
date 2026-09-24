@@ -1,6 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { Trip, TripStatus } from '../entities/trip.entity';
 import { TripItem, TripItemStatus, TripItemType } from '../entities/trip-item.entity';
 import { Branch } from '../entities/branch.entity';
@@ -11,12 +11,13 @@ import { Sale, SaleStatus } from 'src/sales/entities/sale.entity';
 import { TripReturn, TripReturnStatus } from '../entities/trip-return.entity';
 import { TripReturnItem } from '../entities/trip-return-item.entity';
 import { TripIncident, TripIncidentStatus } from '../entities/trip-incident.entity';
-import { AddTripItemsDto, CreateTripDto, DeliverSaleItemDto, DeliveryOutcome, ReceiveTripReturnDto, ResolveTripIncidentDto, TripResponseDto, UpdateTripDto } from '../dto/trip.dto';
+import { AddTripItemsDto, CreateTripDto, CreateTripIncidentDto, DeliverSaleItemDto, DeliveryOutcome, ReceiveTripReturnDto, ResolveTripIncidentDto, TripResponseDto, UpdateTripDto } from '../dto/trip.dto';
 import { ReceiveTransferDto } from '../dto/inventory-transfer.dto';
-import { plainToInstance } from 'class-transformer';
 import { InventoryMovementService } from './inventory-movement.service';
 import { MovementConcept, MovementStatus, MovementType } from '../entities/inventory-movement.entity';
 import { Inventory } from '../entities/inventory.entity';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
+import { TripGateway } from '../gateway/trip.gateway';
 
 @Injectable()
 export class TripService {
@@ -43,6 +44,7 @@ export class TripService {
     private readonly tripIncidentRepository: Repository<TripIncident>,
     private readonly movementService: InventoryMovementService,
     private readonly dataSource: DataSource,
+    private readonly tripGateway: TripGateway,
   ) {}
 
   private async generateTripNumber(): Promise<string> {
@@ -53,7 +55,228 @@ export class TripService {
     return `TRIP-${dateStr}-${sequence}`;
   }
 
-  async create(dto: CreateTripDto, userId?: string): Promise<TripResponseDto> {
+  private isDriver(trip: Trip, user?: any): boolean {
+    return !!user?.id && trip.driver?.id === user.id;
+  }
+
+  private isPlant(trip: Trip, user?: any): boolean {
+    return isSuperAdmin(user) || (!!user?.branch?.id && user.branch.id === trip.originBranch?.id);
+  }
+
+  private isDestinationStaff(trip: Trip, user?: any): boolean {
+    const branchId = user?.branch?.id;
+    if (!branchId) return false;
+    return (trip.items || []).some((item) => item.transfer?.destinationBranch?.id === branchId);
+  }
+
+  private assertCanView(trip: Trip, user?: any): void {
+    if (isSuperAdmin(user) || this.isDriver(trip, user) || this.isPlant(trip, user) || this.isDestinationStaff(trip, user)) {
+      return;
+    }
+    throw new ForbiddenException('No tiene acceso a este viaje');
+  }
+
+  private assertDriver(trip: Trip, user?: any): void {
+    if (isSuperAdmin(user) || this.isDriver(trip, user)) return;
+    throw new ForbiddenException('Solo el piloto asignado puede realizar esta acción');
+  }
+
+  private assertPlant(trip: Trip, user?: any): void {
+    if (this.isPlant(trip, user)) return;
+    throw new ForbiddenException('Solo personal de la planta de origen puede realizar esta acción');
+  }
+
+  private assertDriverOrPlant(trip: Trip, user?: any): void {
+    if (isSuperAdmin(user) || this.isDriver(trip, user) || this.isPlant(trip, user)) return;
+    throw new ForbiddenException('Solo el piloto asignado o personal de planta puede realizar esta acción');
+  }
+
+  private assertPlantNotDriver(trip: Trip, user?: any): void {
+    if (isSuperAdmin(user)) return;
+    if (this.isDriver(trip, user)) {
+      throw new ForbiddenException('El piloto no puede confirmar esta operación de planta');
+    }
+    if (user?.branch?.id && user.branch.id === trip.originBranch?.id) return;
+    throw new ForbiddenException('Solo personal de la planta de origen puede realizar esta acción');
+  }
+
+  /** Recepción de traslado: administrador (global o planta) o sucursal destino. Nunca el piloto. */
+  private assertTransferReceiver(trip: Trip, user?: any, destinationBranchId?: string): void {
+    if (this.isDriver(trip, user) && !isSuperAdmin(user)) {
+      throw new ForbiddenException('El piloto no puede confirmar la recepción del traslado');
+    }
+    if (isSuperAdmin(user)) return;
+    if (this.isPlant(trip, user)) return;
+    if (destinationBranchId && user?.branch?.id === destinationBranchId) return;
+    throw new ForbiddenException('Solo un administrador o personal de la sucursal destino puede confirmar la recepción');
+  }
+
+  private userSummary(user?: User | null) {
+    if (!user?.id) return null;
+    return { id: user.id, name: user.name, email: user.email };
+  }
+
+  private branchSummary(branch?: Branch | null) {
+    if (!branch?.id) return null;
+    return {
+      id: branch.id,
+      name: branch.name,
+      address: branch.address ?? null,
+      phone: branch.phone ?? null,
+      isPlant: branch.isPlant,
+    };
+  }
+
+  private productSummary(product?: any) {
+    if (!product?.id) return null;
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      manageStock: product.manageStock,
+      unit: product.unit
+        ? {
+            id: product.unit.id,
+            name: product.unit.name,
+            abbreviation: product.unit.abbreviation,
+            allowsDecimals: !!product.unit.allowsDecimals,
+          }
+        : null,
+    };
+  }
+
+  private mapSale(sale?: Sale | null) {
+    if (!sale?.id) return null;
+    return {
+      id: sale.id,
+      invoiceNumber: sale.invoiceNumber,
+      status: sale.status,
+      total: sale.total,
+      pendingAmount: sale.pendingAmount,
+      notes: sale.notes,
+      guestCustomer: sale.guestCustomer ?? null,
+      deliveryAddress: sale.deliveryAddress ?? sale.customer?.address ?? sale.guestCustomer?.address ?? null,
+      customer: sale.customer
+        ? {
+            id: sale.customer.id,
+            name: sale.customer.name,
+            phone: sale.customer.phone,
+            address: sale.customer.address,
+          }
+        : null,
+      details: (sale.details || []).map((detail) => ({
+        id: detail.id,
+        quantity: Number(detail.quantity),
+        unitPrice: Number(detail.unitPrice),
+        product: this.productSummary(detail.product),
+      })),
+    };
+  }
+
+  private toTripDto(trip: Trip): TripResponseDto {
+    return {
+      id: trip.id,
+      createdAt: trip.createdAt,
+      updatedAt: trip.updatedAt,
+      deletedAt: trip.deletedAt,
+      tripNumber: trip.tripNumber,
+      date: trip.date,
+      status: trip.status,
+      departureAt: trip.departureAt ?? null,
+      completedAt: trip.completedAt ?? null,
+      notes: trip.notes ?? null,
+      originBranch: this.branchSummary(trip.originBranch),
+      truck: trip.truck
+        ? {
+            id: trip.truck.id,
+            name: trip.truck.name,
+            licensePlate: trip.truck.licensePlate,
+            status: trip.truck.status,
+          }
+        : null,
+      driver: this.userSummary(trip.driver),
+      createdBy: this.userSummary(trip.createdBy),
+      items: (trip.items || []).map((item) => ({
+        id: item.id,
+        type: item.type,
+        status: item.status,
+        sequence: item.sequence,
+        deliveredAt: item.deliveredAt ?? null,
+        notes: item.notes ?? null,
+        sale: this.mapSale(item.sale),
+        transfer: item.transfer
+          ? {
+              id: item.transfer.id,
+              transferNumber: item.transfer.transferNumber,
+              status: item.transfer.status,
+              originBranch: this.branchSummary(item.transfer.originBranch),
+              destinationBranch: this.branchSummary(item.transfer.destinationBranch),
+              items: (item.transfer.items || []).map((transferItem) => ({
+                id: transferItem.id,
+                quantity: Number(transferItem.quantity),
+                receivedQuantity: transferItem.receivedQuantity != null ? Number(transferItem.receivedQuantity) : null,
+                product: this.productSummary(transferItem.product),
+              })),
+            }
+          : null,
+      })),
+      returns: (trip.returns || []).map((tripReturn) => ({
+        id: tripReturn.id,
+        status: tripReturn.status,
+        reason: tripReturn.reason ?? null,
+        receptionNotes: tripReturn.receptionNotes ?? null,
+        receivedAt: tripReturn.receivedAt ?? null,
+        receivedBy: this.userSummary(tripReturn.receivedBy as any),
+        items: (tripReturn.items || []).map((returnItem) => ({
+          id: returnItem.id,
+          returnedQuantity: Number(returnItem.returnedQuantity),
+          receivedQuantity: returnItem.receivedQuantity != null ? Number(returnItem.receivedQuantity) : null,
+          product: this.productSummary(returnItem.product),
+        })),
+      })),
+      incidents: (trip.incidents || []).map((incident) => ({
+        id: incident.id,
+        description: incident.description,
+        status: incident.status,
+        resolutionNotes: incident.resolutionNotes ?? null,
+        resolvedAt: incident.resolvedAt ?? null,
+        resolvedBy: this.userSummary(incident.resolvedBy as any),
+      })),
+    } as TripResponseDto;
+  }
+
+  private toTripDtoList(trips: Trip[]): TripResponseDto[] {
+    return trips.map((trip) => this.toTripDto(trip));
+  }
+
+  private async getTripForAccess(tripId: string, extraRelations: string[] = []): Promise<Trip> {
+    const trip = await this.tripRepository.findOne({
+      where: { id: tripId, deletedAt: IsNull() },
+      relations: ['originBranch', 'driver', ...extraRelations],
+    });
+    if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
+    return trip;
+  }
+
+  private async ensureOpenIncident(tripId: string, description: string, tripItemId?: string): Promise<void> {
+    const existing = await this.tripIncidentRepository.findOne({
+      where: { trip: { id: tripId }, description, status: TripIncidentStatus.OPEN },
+    });
+    if (existing) return;
+    const incident = this.tripIncidentRepository.create({
+      trip: { id: tripId } as Trip,
+      tripItem: tripItemId ? ({ id: tripItemId } as TripItem) : null,
+      description,
+      status: TripIncidentStatus.OPEN,
+    });
+    await this.tripIncidentRepository.save(incident);
+  }
+
+  async create(dto: CreateTripDto, user?: any): Promise<TripResponseDto> {
+    if (!isSuperAdmin(user) && user?.branch?.id !== dto.originBranchId) {
+      throw new ForbiddenException('Solo personal de la planta de origen puede crear viajes');
+    }
+
     const originBranch = await this.branchRepository.findOne({
       where: { id: dto.originBranchId, deletedAt: IsNull() },
     });
@@ -88,7 +311,7 @@ export class TripService {
       driver,
       status: TripStatus.DRAFT,
       notes: dto.notes,
-      createdBy: userId ? ({ id: userId } as any) : null,
+      createdBy: user?.id ? ({ id: user.id } as any) : null,
       items: [],
     });
 
@@ -187,13 +410,9 @@ export class TripService {
     }
   }
 
-  async addItems(tripId: string, dto: AddTripItemsDto): Promise<TripResponseDto> {
-    const trip = await this.tripRepository.findOne({
-      where: { id: tripId, deletedAt: IsNull() },
-    });
-    if (!trip) {
-      throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
-    }
+  async addItems(tripId: string, dto: AddTripItemsDto, user?: any): Promise<TripResponseDto> {
+    const trip = await this.getTripForAccess(tripId);
+    this.assertPlant(trip, user);
     if (trip.status !== TripStatus.DRAFT) {
       throw new BadRequestException(`Solo se pueden agregar operaciones a un viaje en estado BORRADOR (Estado actual: ${trip.status})`);
     }
@@ -202,13 +421,9 @@ export class TripService {
     return this.findOne(tripId);
   }
 
-  async removeItem(tripId: string, itemId: string): Promise<TripResponseDto> {
-    const trip = await this.tripRepository.findOne({
-      where: { id: tripId, deletedAt: IsNull() },
-    });
-    if (!trip) {
-      throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
-    }
+  async removeItem(tripId: string, itemId: string, user?: any): Promise<TripResponseDto> {
+    const trip = await this.getTripForAccess(tripId);
+    this.assertPlant(trip, user);
     if (trip.status !== TripStatus.DRAFT) {
       throw new BadRequestException(`Solo se pueden remover operaciones de un viaje en estado BORRADOR`);
     }
@@ -224,14 +439,16 @@ export class TripService {
     return this.findOne(tripId);
   }
 
-  async confirmDeparture(tripId: string): Promise<TripResponseDto> {
+  async confirmDeparture(tripId: string, user?: any): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['items', 'items.transfer', 'items.sale'],
+      relations: ['originBranch', 'driver', 'items', 'items.transfer', 'items.sale'],
+      relationLoadStrategy: 'query',
     });
     if (!trip) {
       throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
     }
+    this.assertDriverOrPlant(trip, user);
     if (trip.status !== TripStatus.DRAFT) {
       throw new BadRequestException(`El viaje ya no está en estado BORRADOR (Estado actual: ${trip.status})`);
     }
@@ -244,23 +461,24 @@ export class TripService {
     await queryRunner.startTransaction();
 
     try {
-      trip.status = TripStatus.ON_ROUTE;
-      trip.departureAt = new Date();
-      await queryRunner.manager.save(trip);
+      await queryRunner.manager.update(Trip, { id: tripId }, {
+        status: TripStatus.ON_ROUTE,
+        departureAt: new Date(),
+      });
 
-      // Actualizar estados de los traslados y órdenes asignadas
       for (const item of trip.items) {
         if (item.type === TripItemType.TRANSFER && item.transfer) {
           const fullTransfer = await queryRunner.manager.findOne(InventoryTransfer, {
             where: { id: item.transfer.id },
             relations: ['items', 'items.product', 'originBranch', 'destinationBranch'],
+            relationLoadStrategy: 'query',
           });
 
           if (fullTransfer && fullTransfer.status === TransferStatus.PENDING) {
-            fullTransfer.status = TransferStatus.SHIPPED;
-            await queryRunner.manager.save(fullTransfer);
+            await queryRunner.manager.update(InventoryTransfer, { id: fullTransfer.id }, { status: TransferStatus.SHIPPED });
 
             for (const tItem of fullTransfer.items) {
+              if (!tItem.product?.manageStock) continue;
               await this.movementService.create(
                 {
                   productId: tItem.product.id,
@@ -275,19 +493,23 @@ export class TripService {
                   referenceId: fullTransfer.id,
                   referenceNumber: fullTransfer.transferNumber,
                 },
-                trip.createdBy?.id,
+                user?.id,
                 true,
                 queryRunner.manager,
               );
             }
           }
         } else if (item.type === TripItemType.SALE_ORDER && item.sale) {
-          item.sale.status = SaleStatus.OUT_FOR_DELIVERY;
-          await queryRunner.manager.save(item.sale);
+          await queryRunner.manager.update(Sale, { id: item.sale.id }, { status: SaleStatus.OUT_FOR_DELIVERY });
         }
       }
 
       await queryRunner.commitTransaction();
+      this.tripGateway.notifyTripUpdated({
+        type: 'TRIP_STATUS_CHANGED',
+        tripId,
+        tripStatus: TripStatus.ON_ROUTE,
+      });
       return this.findOne(tripId);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -297,13 +519,14 @@ export class TripService {
     }
   }
 
-  async deliverSaleItem(tripId: string, itemId: string, dto: DeliverSaleItemDto, userId?: string): Promise<TripResponseDto> {
+  async deliverSaleItem(tripId: string, itemId: string, dto: DeliverSaleItemDto, user?: any): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['originBranch', 'items', 'items.sale', 'items.sale.details', 'items.sale.details.product'],
+      relations: ['originBranch', 'driver', 'items', 'items.sale', 'items.sale.details', 'items.sale.details.product'],
     });
 
     if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
+    this.assertDriver(trip, user);
     if (trip.status !== TripStatus.ON_ROUTE) {
       throw new BadRequestException(`Solo se pueden marcar entregas en viajes que estén EN RUTA (Estado actual: ${trip.status})`);
     }
@@ -325,46 +548,48 @@ export class TripService {
 
     if (!sale) throw new NotFoundException('Orden de venta no encontrada');
 
-    // 1. Validar Código OTP
     if (!sale.deliveryOtp || sale.deliveryOtp.trim() !== dto.otp.trim()) {
       throw new BadRequestException('Código OTP inválido o no coincide con el provisto al cliente');
     }
+
+    const saleBranchId = sale.branch?.id;
+    if (!saleBranchId) {
+      throw new BadRequestException('La orden de venta no tiene sucursal asociada');
+    }
+    const userId = user?.id;
 
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
 
     try {
-      const originBranchId = trip.originBranch.id;
-
       if (dto.outcome === DeliveryOutcome.FULL) {
-        // 1. ENTREGA COMPLETA: Descontar stock físico y liberar stock reservado
         for (const detail of sale.details) {
-          await this.movementService.create(
-            {
-              productId: detail.product.id,
-              branchId: originBranchId,
-              quantity: detail.quantity,
-              type: MovementType.OUT,
-              notes: `Entrega de Venta ${sale.invoiceNumber} (Viaje ${trip.tripNumber})`,
-              unitCost: detail.product.cost,
-              totalCost: detail.quantity * detail.product.cost,
-              status: MovementStatus.COMPLETED,
-              referenceId: sale.id,
-              referenceNumber: sale.invoiceNumber,
-              concept: MovementConcept.SALE,
-            },
-            userId,
-            true,
-            qr.manager,
-          );
-
           if (detail.product?.manageStock) {
+            await this.movementService.create(
+              {
+                productId: detail.product.id,
+                branchId: saleBranchId,
+                quantity: detail.quantity,
+                type: MovementType.OUT,
+                notes: `Entrega de Venta ${sale.invoiceNumber} (Viaje ${trip.tripNumber})`,
+                unitCost: detail.product.cost,
+                totalCost: detail.quantity * detail.product.cost,
+                status: MovementStatus.COMPLETED,
+                referenceId: sale.id,
+                referenceNumber: sale.invoiceNumber,
+                concept: MovementConcept.SALE,
+              },
+              userId,
+              true,
+              qr.manager,
+            );
+
             await qr.manager.decrement(
               Inventory,
               {
                 product: { id: detail.product.id },
-                branch: { id: originBranchId },
+                branch: { id: saleBranchId },
                 deletedAt: IsNull(),
               },
               'reservedStock',
@@ -383,10 +608,43 @@ export class TripService {
         await qr.manager.save(item);
 
       } else if (dto.outcome === DeliveryOutcome.PARTIAL) {
-        // 2. ENTREGA PARCIAL:
-        // Descontar entregado y crear TripReturn por el resto
         if (!dto.deliveredItems || dto.deliveredItems.length === 0) {
           throw new BadRequestException('Debe especificar las cantidades entregadas en una entrega parcial');
+        }
+
+        const qtyByDetailId = new Map<string, number>();
+        for (const line of dto.deliveredItems) {
+          if (qtyByDetailId.has(line.saleDetailId)) {
+            throw new BadRequestException('Hay renglones duplicados en deliveredItems (mismo saleDetailId)');
+          }
+          qtyByDetailId.set(line.saleDetailId, Number(line.deliveredQuantity));
+        }
+
+        const saleDetailIds = new Set(sale.details.map((d) => d.id));
+        for (const id of qtyByDetailId.keys()) {
+          if (!saleDetailIds.has(id)) {
+            throw new BadRequestException(`El detalle ${id} no pertenece a esta orden`);
+          }
+        }
+
+        let totalDelivered = 0;
+        let totalReturned = 0;
+        for (const detail of sale.details) {
+          const deliveredQty = qtyByDetailId.has(detail.id) ? Number(qtyByDetailId.get(detail.id)) : 0;
+          if (deliveredQty > Number(detail.quantity)) {
+            throw new BadRequestException(
+              `La cantidad entregada (${deliveredQty}) supera la orden (${detail.quantity}) para ${detail.product.name}`,
+            );
+          }
+          totalDelivered += deliveredQty;
+          totalReturned += Math.max(0, Number(detail.quantity) - deliveredQty);
+        }
+
+        if (totalDelivered <= 0) {
+          throw new BadRequestException('Una entrega parcial requiere al menos una cantidad entregada. Use rejected si no hubo entrega');
+        }
+        if (totalReturned <= 0) {
+          throw new BadRequestException('No hay cantidades a devolver. Use outcome full');
         }
 
         const tripReturn = qr.manager.create(TripReturn, {
@@ -394,7 +652,7 @@ export class TripService {
           tripItem: { id: item.id } as TripItem,
           sale: { id: sale.id } as Sale,
           status: TripReturnStatus.PENDING_RECEIPT,
-          reason: dto.reason || 'Entrega parcial en ruta',
+          reason: dto.reason,
           items: [],
         });
 
@@ -402,20 +660,14 @@ export class TripService {
         const returnItemsToSave: TripReturnItem[] = [];
 
         for (const detail of sale.details) {
-          const prodDelivered = dto.deliveredItems.find((di) => di.productId === detail.product.id);
-          const deliveredQty = prodDelivered ? Number(prodDelivered.deliveredQuantity) : 0;
+          const deliveredQty = qtyByDetailId.has(detail.id) ? Number(qtyByDetailId.get(detail.id)) : 0;
           const returnedQty = Math.max(0, Number(detail.quantity) - deliveredQty);
 
-          if (deliveredQty > Number(detail.quantity)) {
-            throw new BadRequestException(`La cantidad entregada (${deliveredQty}) supera la orden (${detail.quantity}) para ${detail.product.name}`);
-          }
-
-          // Descontar de stock físico y liberar reserva de lo efectivamente entregado
-          if (deliveredQty > 0) {
+          if (deliveredQty > 0 && detail.product?.manageStock) {
             await this.movementService.create(
               {
                 productId: detail.product.id,
-                branchId: originBranchId,
+                branchId: saleBranchId,
                 quantity: deliveredQty,
                 type: MovementType.OUT,
                 notes: `Entrega Parcial Venta ${sale.invoiceNumber} (Viaje ${trip.tripNumber})`,
@@ -431,21 +683,18 @@ export class TripService {
               qr.manager,
             );
 
-            if (detail.product?.manageStock) {
-              await qr.manager.decrement(
-                Inventory,
-                {
-                  product: { id: detail.product.id },
-                  branch: { id: originBranchId },
-                  deletedAt: IsNull(),
-                },
-                'reservedStock',
-                deliveredQty,
-              );
-            }
+            await qr.manager.decrement(
+              Inventory,
+              {
+                product: { id: detail.product.id },
+                branch: { id: saleBranchId },
+                deletedAt: IsNull(),
+              },
+              'reservedStock',
+              deliveredQty,
+            );
           }
 
-          // Crear item de devolución para lo que regresa en el camión
           if (returnedQty > 0) {
             const retItem = qr.manager.create(TripReturnItem, {
               tripReturn: savedReturn,
@@ -465,18 +714,16 @@ export class TripService {
 
         item.status = TripItemStatus.PARTIALLY_DELIVERED;
         item.deliveredAt = new Date();
-        item.notes = dto.reason ? `Entrega parcial: ${dto.reason}` : 'Entrega parcial';
+        item.notes = `Entrega parcial: ${dto.reason}`;
         await qr.manager.save(item);
 
       } else if (dto.outcome === DeliveryOutcome.REJECTED) {
-        // 3. ENTREGA RECHAZADA:
-        // Todo el pedido genera una devolución de viaje en tránsito de retorno a planta
         const tripReturn = qr.manager.create(TripReturn, {
           trip: { id: trip.id } as Trip,
           tripItem: { id: item.id } as TripItem,
           sale: { id: sale.id } as Sale,
           status: TripReturnStatus.PENDING_RECEIPT,
-          reason: dto.reason || 'Pedido rechazado por cliente en ruta',
+          reason: dto.reason,
           items: [],
         });
 
@@ -499,11 +746,19 @@ export class TripService {
 
         item.status = TripItemStatus.REJECTED;
         item.deliveredAt = new Date();
-        item.notes = dto.reason ? `Rechazado: ${dto.reason}` : 'Rechazado por el cliente';
+        item.notes = `Rechazado: ${dto.reason}`;
         await qr.manager.save(item);
       }
 
       await qr.commitTransaction();
+      this.tripGateway.notifyTripUpdated({
+        type: 'SALE_DELIVERED',
+        tripId,
+        itemId,
+        itemStatus: item.status,
+        tripStatus: trip.status,
+        outcome: dto.outcome,
+      });
       return this.findOne(tripId);
     } catch (error) {
       await qr.rollbackTransaction();
@@ -513,21 +768,21 @@ export class TripService {
     }
   }
 
-  async deliverTransferItem(tripId: string, itemId: string, dto: ReceiveTransferDto, userId?: string): Promise<TripResponseDto> {
+  async deliverTransferItem(tripId: string, itemId: string, dto: ReceiveTransferDto, user?: any): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['originBranch', 'items', 'items.transfer', 'items.transfer.originBranch', 'items.transfer.destinationBranch', 'items.transfer.items', 'items.transfer.items.product'],
+      relations: ['originBranch', 'driver', 'items', 'items.transfer', 'items.transfer.originBranch', 'items.transfer.destinationBranch', 'items.transfer.items', 'items.transfer.items.product'],
     });
 
     if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
-    if (trip.status !== TripStatus.ON_ROUTE) {
-      throw new BadRequestException(`Solo se pueden marcar entregas en viajes que estén EN RUTA (Estado actual: ${trip.status})`);
-    }
-
     const item = trip.items.find((i) => i.id === itemId);
     if (!item) throw new NotFoundException(`Operación con ID ${itemId} no encontrada en este viaje`);
     if (item.type !== TripItemType.TRANSFER || !item.transfer) {
       throw new BadRequestException('Esta operación no es un traslado de inventario');
+    }
+    this.assertTransferReceiver(trip, user, item.transfer.destinationBranch?.id);
+    if (trip.status !== TripStatus.ON_ROUTE) {
+      throw new BadRequestException(`Solo se pueden marcar entregas en viajes que estén EN RUTA (Estado actual: ${trip.status})`);
     }
 
     if (item.status === TripItemStatus.DELIVERED) {
@@ -541,6 +796,7 @@ export class TripService {
 
     if (!transfer) throw new NotFoundException('Traslado no encontrado');
 
+    const userId = user?.id;
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -626,6 +882,14 @@ export class TripService {
       }
 
       await qr.commitTransaction();
+      this.tripGateway.notifyTripUpdated({
+        type: 'TRANSFER_RECEIVED',
+        tripId,
+        itemId,
+        itemStatus: item.status,
+        tripStatus: trip.status,
+        transferStatus: transfer.status,
+      });
       return this.findOne(tripId);
     } catch (error) {
       await qr.rollbackTransaction();
@@ -635,70 +899,29 @@ export class TripService {
     }
   }
 
-  async completeItem(tripId: string, itemId: string, notes?: string): Promise<TripResponseDto> {
+  async completeItem(tripId: string, itemId: string): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['items', 'items.transfer', 'items.sale'],
+      relations: ['items'],
     });
     if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
-    if (trip.status !== TripStatus.ON_ROUTE) {
-      throw new BadRequestException(`Solo se pueden marcar entregas en viajes que estén EN RUTA (Estado actual: ${trip.status})`);
-    }
 
     const item = trip.items.find((i) => i.id === itemId);
     if (!item) throw new NotFoundException(`Operación con ID ${itemId} no encontrada en este viaje`);
 
-    item.status = TripItemStatus.DELIVERED;
-    item.deliveredAt = new Date();
-    if (notes) item.notes = notes;
-    await this.tripItemRepository.save(item);
-
-    // Si es un traslado, actualizar a RECEIVED e ingresar stock a la sucursal de destino
-    if (item.type === TripItemType.TRANSFER && item.transfer) {
-      const fullTransfer = await this.transferRepository.findOne({
-        where: { id: item.transfer.id },
-        relations: ['items', 'items.product', 'originBranch', 'destinationBranch'],
-      });
-
-      if (fullTransfer && fullTransfer.status !== TransferStatus.RECEIVED) {
-        fullTransfer.status = TransferStatus.RECEIVED;
-        await this.transferRepository.save(fullTransfer);
-
-        for (const tItem of fullTransfer.items) {
-          await this.movementService.create(
-            {
-              productId: tItem.product.id,
-              branchId: fullTransfer.destinationBranch.id,
-              quantity: tItem.quantity,
-              type: MovementType.TRANSFER_IN,
-              sourceBranchId: fullTransfer.originBranch.id,
-              targetBranchId: fullTransfer.destinationBranch.id,
-              notes: `Viaje ${trip.tripNumber} - Traslado ${fullTransfer.transferNumber} (Entrada en destino)`,
-              status: MovementStatus.COMPLETED,
-              concept: MovementConcept.TRANSFER,
-              referenceId: fullTransfer.id,
-              referenceNumber: fullTransfer.transferNumber,
-            },
-            trip.createdBy?.id,
-            true,
-          );
-        }
-      }
-    } else if (item.type === TripItemType.SALE_ORDER && item.sale) {
-      item.sale.status = SaleStatus.DELIVERED;
-      item.sale.deliveredAt = new Date();
-      await this.saleRepository.save(item.sale);
+    if (item.type === TripItemType.SALE_ORDER) {
+      throw new BadRequestException('Use POST /trips/:id/items/:itemId/deliver-sale con el OTP del cliente');
     }
-
-    return this.findOne(tripId);
+    throw new BadRequestException('Use POST /trips/:id/items/:itemId/deliver-transfer para registrar la recepción del traslado');
   }
 
-  async cancel(tripId: string, reason?: string): Promise<TripResponseDto> {
+  async cancel(tripId: string, reason?: string, user?: any): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['items', 'items.transfer', 'items.sale'],
+      relations: ['originBranch', 'driver', 'items', 'items.transfer', 'items.sale'],
     });
     if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
+    this.assertPlant(trip, user);
     if (trip.status === TripStatus.COMPLETED) {
       throw new BadRequestException('No se puede cancelar un viaje que ya ha sido completado');
     }
@@ -762,19 +985,53 @@ export class TripService {
     }
   }
 
-  async findAll(branchId?: string, status?: TripStatus, date?: string): Promise<TripResponseDto[]> {
-    const queryBuilder = this.tripRepository
+  private readonly tripGraphRelations = [
+    'originBranch',
+    'truck',
+    'driver',
+    'createdBy',
+    'items',
+    'items.transfer',
+    'items.transfer.originBranch',
+    'items.transfer.destinationBranch',
+    'items.transfer.items',
+    'items.transfer.items.product',
+    'items.transfer.items.product.unit',
+    'items.sale',
+    'items.sale.customer',
+    'items.sale.details',
+    'items.sale.details.product',
+    'items.sale.details.product.unit',
+    'returns',
+    'returns.items',
+    'returns.items.product',
+    'returns.items.product.unit',
+    'returns.receivedBy',
+    'incidents',
+    'incidents.resolvedBy',
+  ];
+
+  private async loadTripsByIds(ids: string[]): Promise<Trip[]> {
+    if (!ids.length) return [];
+    const trips = await this.tripRepository.find({
+      where: { id: In(ids), deletedAt: IsNull() },
+      relations: this.tripGraphRelations,
+      relationLoadStrategy: 'query',
+    });
+    const byId = new Map(trips.map((trip) => [trip.id, trip]));
+    return ids.map((id) => byId.get(id)).filter((trip): trip is Trip => !!trip);
+  }
+
+  private createListQuery() {
+    return this.tripRepository
       .createQueryBuilder('trip')
-      .leftJoinAndSelect('trip.originBranch', 'originBranch')
-      .leftJoinAndSelect('trip.truck', 'truck')
-      .leftJoinAndSelect('trip.driver', 'driver')
-      .leftJoinAndSelect('trip.createdBy', 'createdBy')
-      .leftJoinAndSelect('trip.items', 'items')
-      .leftJoinAndSelect('items.transfer', 'transfer')
-      .leftJoinAndSelect('transfer.destinationBranch', 'destBranch')
-      .leftJoinAndSelect('items.sale', 'sale')
-      .leftJoinAndSelect('sale.customer', 'customer')
+      .leftJoin('trip.originBranch', 'originBranch')
+      .leftJoin('trip.driver', 'driver')
       .where('trip.deletedAt IS NULL');
+  }
+
+  async findAll(branchId?: string, status?: TripStatus, date?: string): Promise<TripResponseDto[]> {
+    const queryBuilder = this.createListQuery();
 
     if (branchId) {
       queryBuilder.andWhere('originBranch.id = :branchId', { branchId });
@@ -788,26 +1045,56 @@ export class TripService {
       queryBuilder.andWhere('trip.date = :date', { date });
     }
 
-    queryBuilder.orderBy('trip.createdAt', 'DESC');
-
-    const trips = await queryBuilder.getMany();
-    return plainToInstance(TripResponseDto, trips);
+    queryBuilder.select('trip.id', 'id').orderBy('trip.createdAt', 'DESC');
+    const rows = await queryBuilder.getRawMany();
+    const ids = rows.map((row) => row.id).filter(Boolean);
+    const trips = await this.loadTripsByIds(ids);
+    return this.toTripDtoList(trips);
   }
 
-  async receiveReturn(tripId: string, returnId: string, dto: ReceiveTripReturnDto, userId?: string): Promise<TripResponseDto> {
+  async findMine(driverId: string, status?: TripStatus, date?: string): Promise<TripResponseDto[]> {
+    const queryBuilder = this.createListQuery();
+    queryBuilder.andWhere('driver.id = :driverId', { driverId });
+
+    if (status) {
+      queryBuilder.andWhere('trip.status = :status', { status });
+    } else {
+      queryBuilder.andWhere('trip.status IN (:...statuses)', {
+        statuses: [TripStatus.DRAFT, TripStatus.ON_ROUTE],
+      });
+    }
+
+    if (date) {
+      queryBuilder.andWhere('trip.date = :date', { date });
+    }
+
+    queryBuilder.select('trip.id', 'id').orderBy('trip.date', 'ASC').addOrderBy('trip.createdAt', 'DESC');
+    const rows = await queryBuilder.getRawMany();
+    const ids = rows.map((row) => row.id).filter(Boolean);
+    const trips = await this.loadTripsByIds(ids);
+    return this.toTripDtoList(trips);
+  }
+
+  async receiveReturn(tripId: string, returnId: string, dto: ReceiveTripReturnDto, user?: any): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['originBranch'],
+      relations: ['originBranch', 'driver'],
     });
     if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
+    this.assertPlantNotDriver(trip, user);
 
     const tripReturn = await this.tripReturnRepository.findOne({
       where: { id: returnId, trip: { id: tripId }, deletedAt: IsNull() },
-      relations: ['items', 'items.product', 'sale'],
+      relations: ['items', 'items.product', 'sale', 'sale.branch'],
     });
     if (!tripReturn) throw new NotFoundException(`Devolución con ID ${returnId} no encontrada en este viaje`);
     if (tripReturn.status === TripReturnStatus.RECEIVED_IN_WAREHOUSE) {
       throw new BadRequestException('Esta devolución ya fue recibida y procesada en bodega');
+    }
+
+    const saleBranchId = tripReturn.sale?.branch?.id;
+    if (!saleBranchId) {
+      throw new BadRequestException('La orden asociada a la devolución no tiene sucursal');
     }
 
     const qr = this.dataSource.createQueryRunner();
@@ -815,8 +1102,6 @@ export class TripService {
     await qr.startTransaction();
 
     try {
-      const originBranchId = trip.originBranch.id;
-
       for (const item of tripReturn.items) {
         let receivedQty = Number(item.returnedQuantity);
         if (dto.items && dto.items.length > 0) {
@@ -827,35 +1112,12 @@ export class TripService {
         item.receivedQuantity = receivedQty;
         await qr.manager.save(item);
 
-        // 1. Ingresar stock físico recuperado a la planta/origen
-        if (receivedQty > 0) {
-          await this.movementService.create(
-            {
-              productId: item.product.id,
-              branchId: originBranchId,
-              quantity: receivedQty,
-              type: MovementType.IN,
-              notes: `Recepción Devolución Viaje ${trip.tripNumber} (Orden ${tripReturn.sale.invoiceNumber})`,
-              unitCost: item.product.cost,
-              totalCost: receivedQty * item.product.cost,
-              status: MovementStatus.COMPLETED,
-              referenceId: tripReturn.id,
-              referenceNumber: trip.tripNumber,
-              concept: MovementConcept.RETURN,
-            },
-            userId,
-            true,
-            qr.manager,
-          );
-        }
-
-        // 2. Liberar la reserva remanente en inventario que correspondía a la cantidad no entregada
         if (item.product?.manageStock) {
           await qr.manager.decrement(
             Inventory,
             {
               product: { id: item.product.id },
-              branch: { id: originBranchId },
+              branch: { id: saleBranchId },
               deletedAt: IsNull(),
             },
             'reservedStock',
@@ -866,7 +1128,7 @@ export class TripService {
 
       tripReturn.status = TripReturnStatus.RECEIVED_IN_WAREHOUSE;
       tripReturn.receivedAt = new Date();
-      tripReturn.receivedBy = userId ? ({ id: userId } as any) : null;
+      tripReturn.receivedBy = user?.id ? ({ id: user.id } as any) : null;
       if (dto.notes) tripReturn.receptionNotes = dto.notes;
       await qr.manager.save(tripReturn);
 
@@ -880,7 +1142,31 @@ export class TripService {
     }
   }
 
-  async resolveIncident(tripId: string, incidentId: string, dto: ResolveTripIncidentDto, userId?: string): Promise<TripResponseDto> {
+  async createIncident(tripId: string, dto: CreateTripIncidentDto, user?: any): Promise<TripResponseDto> {
+    const trip = await this.getTripForAccess(tripId);
+    this.assertDriverOrPlant(trip, user);
+
+    if (dto.tripItemId) {
+      const item = await this.tripItemRepository.findOne({
+        where: { id: dto.tripItemId, trip: { id: tripId } },
+      });
+      if (!item) throw new NotFoundException(`Operación con ID ${dto.tripItemId} no encontrada en este viaje`);
+    }
+
+    const incident = this.tripIncidentRepository.create({
+      trip: { id: tripId } as Trip,
+      tripItem: dto.tripItemId ? ({ id: dto.tripItemId } as TripItem) : null,
+      description: dto.description,
+      status: TripIncidentStatus.OPEN,
+    });
+    await this.tripIncidentRepository.save(incident);
+    return this.findOne(tripId);
+  }
+
+  async resolveIncident(tripId: string, incidentId: string, dto: ResolveTripIncidentDto, user?: any): Promise<TripResponseDto> {
+    const trip = await this.getTripForAccess(tripId);
+    this.assertPlantNotDriver(trip, user);
+
     const incident = await this.tripIncidentRepository.findOne({
       where: { id: incidentId, trip: { id: tripId }, deletedAt: IsNull() },
     });
@@ -889,65 +1175,46 @@ export class TripService {
     incident.status = TripIncidentStatus.RESOLVED;
     incident.resolutionNotes = dto.resolutionNotes;
     incident.resolvedAt = new Date();
-    incident.resolvedBy = userId ? ({ id: userId } as any) : null;
+    incident.resolvedBy = user?.id ? ({ id: user.id } as any) : null;
 
     await this.tripIncidentRepository.save(incident);
     return this.findOne(tripId);
   }
 
-  async completeTrip(tripId: string): Promise<TripResponseDto> {
+  async completeTrip(tripId: string, user?: any): Promise<TripResponseDto> {
     const trip = await this.tripRepository.findOne({
       where: { id: tripId, deletedAt: IsNull() },
-      relations: ['items', 'returns', 'incidents'],
+      relations: ['originBranch', 'driver', 'items', 'returns', 'incidents'],
     });
     if (!trip) throw new NotFoundException(`Viaje con ID ${tripId} no encontrado`);
+    this.assertDriverOrPlant(trip, user);
     if (trip.status !== TripStatus.ON_ROUTE) {
       throw new BadRequestException(`Solo se pueden finalizar viajes que estén EN RUTA (Estado actual: ${trip.status})`);
     }
 
-    // 1. Validar si existen paradas pendientes
     const pendingItems = trip.items.filter((i) => i.status === TripItemStatus.PENDING);
-    if (pendingItems.length > 0) {
-      // Registrar incidencia automática si no existe
-      const desc = `El viaje tiene ${pendingItems.length} parada(s) sin procesar`;
-      const existing = await this.tripIncidentRepository.findOne({
-        where: { trip: { id: tripId }, description: desc, status: TripIncidentStatus.OPEN },
-      });
-      if (!existing) {
-        const incident = this.tripIncidentRepository.create({
-          trip: { id: tripId } as Trip,
-          description: desc,
-          status: TripIncidentStatus.OPEN,
-        });
-        await this.tripIncidentRepository.save(incident);
-      }
-
-      throw new BadRequestException(`No se puede finalizar el viaje: Tiene ${pendingItems.length} parada(s) pendientes de atención. Se ha registrado una incidencia.`);
+    const failedItems = trip.items.filter((i) => i.status === TripItemStatus.FAILED);
+    const blockingStops = pendingItems.length + failedItems.length;
+    if (blockingStops > 0) {
+      const desc = pendingItems.length
+        ? `El viaje tiene ${pendingItems.length} parada(s) sin procesar`
+        : `El viaje tiene ${failedItems.length} parada(s) con falla sin resolver`;
+      await this.ensureOpenIncident(tripId, desc);
+      throw new BadRequestException(
+        `No se puede finalizar el viaje: Tiene ${blockingStops} parada(s) pendientes o con falla. Se ha registrado una incidencia.`,
+      );
     }
 
-    // 2. Validar si existen devoluciones pendientes de recepción en planta
     const returns = await this.tripReturnRepository.find({
       where: { trip: { id: tripId }, deletedAt: IsNull() },
     });
     const pendingReturns = returns.filter((r) => r.status === TripReturnStatus.PENDING_RECEIPT);
     if (pendingReturns.length > 0) {
       const desc = `Tiene ${pendingReturns.length} devolución(es) en tránsito pendientes de ser recibidas en bodega`;
-      const existing = await this.tripIncidentRepository.findOne({
-        where: { trip: { id: tripId }, description: desc, status: TripIncidentStatus.OPEN },
-      });
-      if (!existing) {
-        const incident = this.tripIncidentRepository.create({
-          trip: { id: tripId } as Trip,
-          description: desc,
-          status: TripIncidentStatus.OPEN,
-        });
-        await this.tripIncidentRepository.save(incident);
-      }
-
+      await this.ensureOpenIncident(tripId, desc);
       throw new BadRequestException(`No se puede finalizar el viaje: Hay ${pendingReturns.length} devolución(es) pendientes de confirmación en planta.`);
     }
 
-    // 3. Validar si existen incidencias abiertas
     const openIncidents = await this.tripIncidentRepository.find({
       where: { trip: { id: tripId }, status: TripIncidentStatus.OPEN, deletedAt: IsNull() },
     });
@@ -962,38 +1229,15 @@ export class TripService {
     return this.findOne(tripId);
   }
 
-  async findOne(id: string): Promise<TripResponseDto> {
-    const trip = await this.tripRepository.findOne({
-      where: { id, deletedAt: IsNull() },
-      relations: [
-        'originBranch',
-        'truck',
-        'driver',
-        'createdBy',
-        'items',
-        'items.transfer',
-        'items.transfer.originBranch',
-        'items.transfer.destinationBranch',
-        'items.transfer.items',
-        'items.transfer.items.product',
-        'items.sale',
-        'items.sale.customer',
-        'items.sale.details',
-        'items.sale.details.product',
-        'returns',
-        'returns.items',
-        'returns.items.product',
-        'returns.receivedBy',
-        'incidents',
-        'incidents.resolvedBy',
-      ],
-    });
+  async findOne(id: string, user?: any): Promise<TripResponseDto> {
+    const [trip] = await this.loadTripsByIds([id]);
 
     if (!trip) {
       throw new NotFoundException(`Viaje con ID ${id} no encontrado`);
     }
 
-    return plainToInstance(TripResponseDto, trip);
+    if (user) this.assertCanView(trip, user);
+    return this.toTripDto(trip);
   }
 
   async getPendingOperations(originBranchId?: string): Promise<{
@@ -1007,6 +1251,7 @@ export class TripService {
       .leftJoinAndSelect('transfer.destinationBranch', 'destBranch')
       .leftJoinAndSelect('transfer.items', 'items')
       .leftJoinAndSelect('items.product', 'product')
+      .leftJoinAndSelect('product.unit', 'transferProductUnit')
       .where('transfer.deletedAt IS NULL')
       .andWhere('transfer.status = :status', { status: TransferStatus.PENDING })
       .andWhere((qb) => {
@@ -1034,6 +1279,7 @@ export class TripService {
       .leftJoinAndSelect('sale.branch', 'branch')
       .leftJoinAndSelect('sale.details', 'details')
       .leftJoinAndSelect('details.product', 'product')
+      .leftJoinAndSelect('product.unit', 'saleProductUnit')
       .where('sale.deletedAt IS NULL')
       .andWhere('sale.status IN (:...pendingSaleStatuses)', {
         pendingSaleStatuses: [SaleStatus.CONFIRMED, SaleStatus.PREPARING, SaleStatus.READY_FOR_PICKUP, SaleStatus.PENDING],

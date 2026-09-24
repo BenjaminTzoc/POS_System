@@ -18,4 +18,4 @@ export { CreateUnitDto, UpdateUnitDto, UnitResponseDto } from './unit.dto';
 export { CreateInventoryTransferDto, UpdateInventoryTransferDto, UpdateTransferStatusDto, InventoryTransferResponseDto, InventoryTransferListResponseDto } from './inventory-transfer.dto';
 export { CreateAreaDto, UpdateAreaDto, AreaResponseDto } from './area.dto';
 export { CreateTruckDto, UpdateTruckDto, TruckResponseDto } from './truck.dto';
-export { CreateTripDto, UpdateTripDto, TripResponseDto, CreateTripItemDto, AddTripItemsDto, TripItemResponseDto } from './trip.dto';
+export { CreateTripDto, UpdateTripDto, TripResponseDto, CreateTripItemDto, AddTripItemsDto, TripItemResponseDto, CreateTripIncidentDto, DeliverSaleItemDto } from './trip.dto';

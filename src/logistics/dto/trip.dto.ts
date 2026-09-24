@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsUUID, IsEnum, IsDateString, IsArray, ValidateNested, IsNumber, Min, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsUUID, IsEnum, IsDateString, IsArray, ValidateNested, IsNumber, Min, IsString, Matches, ValidateIf } from 'class-validator';
 import { Type, Expose } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
 import { BaseEntity } from '../../common/entities/base.entity';
@@ -78,9 +78,13 @@ export enum DeliveryOutcome {
 }
 
 export class DeliverSaleItemDetailDto {
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'El id del detalle de la orden es obligatorio' })
   @IsUUID()
-  productId: string;
+  saleDetailId: string;
+
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
 
   @IsNotEmpty()
   @IsNumber()
@@ -91,21 +95,34 @@ export class DeliverSaleItemDetailDto {
 export class DeliverSaleItemDto {
   @IsNotEmpty({ message: 'El código OTP es obligatorio para confirmar la entrega' })
   @IsString()
+  @Matches(/^\d{6}$/, { message: 'El OTP debe ser de 6 dígitos numéricos' })
   otp: string;
 
   @IsNotEmpty({ message: 'El resultado de la entrega es obligatorio (full, partial, rejected)' })
   @IsEnum(DeliveryOutcome)
   outcome: DeliveryOutcome;
 
-  @IsOptional()
+  @ValidateIf((o) => o.outcome === DeliveryOutcome.PARTIAL || o.outcome === DeliveryOutcome.REJECTED)
+  @IsNotEmpty({ message: 'El motivo es obligatorio en entrega parcial o rechazada' })
   @IsString()
   reason?: string;
 
-  @IsOptional()
+  @ValidateIf((o) => o.outcome === DeliveryOutcome.PARTIAL)
+  @IsNotEmpty({ message: 'Debe especificar las cantidades entregadas en una entrega parcial' })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => DeliverSaleItemDetailDto)
   deliveredItems?: DeliverSaleItemDetailDto[];
+}
+
+export class CreateTripIncidentDto {
+  @IsNotEmpty({ message: 'La descripción de la incidencia es obligatoria' })
+  @IsString()
+  description: string;
+
+  @IsOptional()
+  @IsUUID()
+  tripItemId?: string;
 }
 
 export class ReceiveTripReturnItemDto {

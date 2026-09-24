@@ -60,6 +60,9 @@ export class Sale extends BaseEntity {
   @Column({ name: 'is_preorder', type: 'boolean', default: false })
   isPreorder: boolean;
 
+  @Column({ name: 'delivery_address', type: 'text', nullable: true })
+  deliveryAddress?: string | null;
+
   @Column({ name: 'delivered_at', type: 'timestamp', nullable: true })
   deliveredAt?: Date | null;
 

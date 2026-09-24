@@ -156,7 +156,7 @@ export const MENU_ITEMS: MenuItem[] = [
     permission: '',
     children: [
       {
-        label: 'Camiones',
+        label: 'Vehículos',
         icon: 'pi pi-car',
         route: '/logistics/trucks',
         permission: '',

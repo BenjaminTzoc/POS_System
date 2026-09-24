@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Inventory, InventoryMovement } from '../entities';
+import { Branch, Inventory, InventoryMovement, Product } from '../entities';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { BranchService, InventoryService, ProductService } from '.';
 import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto, QueryInventoryMovementDto, PaginatedInventoryMovementResponseDto } from '../dto';
@@ -29,10 +29,17 @@ export class InventoryMovementService {
       throw new BadRequestException('Los movimientos de merma (WASTE) deben ser de tipo salida (OUT).');
     }
 
-    let product;
-    try {
-      product = await this.productService.findOne(dto.productId);
-    } catch (error) {
+    const productRepo = manager ? manager.getRepository(Product) : this.dataSource.getRepository(Product);
+    const branchRepo = manager ? manager.getRepository(Branch) : this.dataSource.getRepository(Branch);
+
+    const product = await productRepo
+      .createQueryBuilder('p')
+      .select(['p.id', 'p.name', 'p.manageStock', 'p.isMaster', 'p.cost'])
+      .where('p.id = :id', { id: dto.productId })
+      .andWhere('p.deletedAt IS NULL')
+      .getOne();
+
+    if (!product) {
       throw new BadRequestException(`El producto con ID ${dto.productId} no existe`);
     }
 
@@ -44,34 +51,47 @@ export class InventoryMovementService {
       throw new BadRequestException(`El producto "${product.name}" es un producto maestro y no admite movimientos directos de inventario.`);
     }
 
-    let branch;
-    try {
-      branch = await this.branchService.findOne(dto.branchId);
-    } catch (error) {
+    const branch = await branchRepo
+      .createQueryBuilder('b')
+      .select(['b.id'])
+      .where('b.id = :id', { id: dto.branchId })
+      .andWhere('b.deletedAt IS NULL')
+      .getOne();
+
+    if (!branch) {
       throw new BadRequestException(`La sucursal con ID ${dto.branchId} no existe`);
     }
 
-    let inventory: any = null;
+    let inventory: Pick<Inventory, 'id' | 'stock'> | null = null;
     if (dto.inventoryId) {
-      try {
-        inventory = await this.inventoryService.findOne(dto.inventoryId);
-        if (inventory.product.id !== dto.productId || inventory.branch.id !== dto.branchId) {
-          throw new BadRequestException('El inventory no corresponde al producto y sucursal especificados');
-        }
-      } catch (error) {
+      const inventoryRow = await invRepo
+        .createQueryBuilder('inv')
+        .select(['inv.id', 'inv.stock'])
+        .addSelect('inv.product_id', 'productId')
+        .addSelect('inv.branch_id', 'branchId')
+        .where('inv.id = :id', { id: dto.inventoryId })
+        .andWhere('inv.deletedAt IS NULL')
+        .getRawAndEntities();
+      inventory = inventoryRow.entities[0] ?? null;
+      if (!inventory) {
         throw new BadRequestException(`El inventory con ID ${dto.inventoryId} no existe`);
       }
+      const ids = inventoryRow.raw[0];
+      const rowProductId = ids?.productId ?? ids?.inv_product_id;
+      const rowBranchId = ids?.branchId ?? ids?.inv_branch_id;
+      if (rowProductId !== dto.productId || rowBranchId !== dto.branchId) {
+        throw new BadRequestException('El inventory no corresponde al producto y sucursal especificados');
+      }
     } else {
-      inventory = await this.dataSource.getRepository(Inventory).findOne({
-        where: {
-          product: { id: dto.productId },
-          branch: { id: dto.branchId },
-          deletedAt: IsNull(),
-        },
-      });
+      inventory = await invRepo
+        .createQueryBuilder('inv')
+        .select(['inv.id', 'inv.stock'])
+        .where('inv.product_id = :productId', { productId: dto.productId })
+        .andWhere('inv.branch_id = :branchId', { branchId: dto.branchId })
+        .andWhere('inv.deletedAt IS NULL')
+        .getOne();
     }
 
-    let sourceBranch, targetBranch;
     if (dto.type === MovementType.TRANSFER_OUT || dto.type === MovementType.TRANSFER_IN) {
       if (!dto.sourceBranchId || !dto.targetBranchId) {
         throw new BadRequestException('Las transferencias requieren sourceBranchId y targetBranchId');
@@ -81,15 +101,23 @@ export class InventoryMovementService {
         throw new BadRequestException('Las sucursales de origen y destino no pueden ser las mismas');
       }
 
-      try {
-        sourceBranch = await this.branchService.findOne(dto.sourceBranchId);
-      } catch (error) {
+      const sourceBranch = await branchRepo
+        .createQueryBuilder('b')
+        .select(['b.id'])
+        .where('b.id = :id', { id: dto.sourceBranchId })
+        .andWhere('b.deletedAt IS NULL')
+        .getOne();
+      if (!sourceBranch) {
         throw new BadRequestException(`La sucursal origen con ID ${dto.sourceBranchId} no existe`);
       }
 
-      try {
-        targetBranch = await this.branchService.findOne(dto.targetBranchId);
-      } catch (error) {
+      const targetBranch = await branchRepo
+        .createQueryBuilder('b')
+        .select(['b.id'])
+        .where('b.id = :id', { id: dto.targetBranchId })
+        .andWhere('b.deletedAt IS NULL')
+        .getOne();
+      if (!targetBranch) {
         throw new BadRequestException(`La sucursal destino con ID ${dto.targetBranchId} no existe`);
       }
     }
@@ -115,13 +143,15 @@ export class InventoryMovementService {
       ? Math.abs(dto.quantity - previousStock) * unitCost
       : dto.quantity * unitCost);
 
+    const status = dto.status || MovementStatus.PENDING;
+    const completedAt = status === MovementStatus.COMPLETED ? new Date() : undefined;
     const movement = repo.create({
       product: { id: dto.productId },
       branch: { id: dto.branchId },
       inventory: dto.inventoryId ? { id: dto.inventoryId } : undefined,
       quantity: dto.quantity,
       type: dto.type,
-      status: dto.status || MovementStatus.PENDING,
+      status,
       referenceId: dto.referenceId,
       referenceNumber: dto.referenceNumber,
       concept: dto.concept,
@@ -134,21 +164,16 @@ export class InventoryMovementService {
       previousStock,
       newStock,
       createdBy: userId ? ({ id: userId } as any) : null,
+      completedAt,
+      completedBy: status === MovementStatus.COMPLETED && userId ? ({ id: userId } as any) : null,
     });
 
-    if (movement.status === MovementStatus.COMPLETED) {
-      movement.completedAt = new Date();
-      movement.completedBy = userId ? ({ id: userId } as any) : null;
-    }
+    const insertResult = await repo.insert(movement);
+    const savedId = insertResult.identifiers[0]?.id;
+    movement.id = savedId;
 
-    const savedMovement = await repo.save(movement);
-
-    if (savedMovement.status === MovementStatus.COMPLETED) {
-      await this.updateInventory(savedMovement, manager);
-    }
-
-    if (manager) {
-      return this.findOneInTransaction(savedMovement.id, manager);
+    if (status === MovementStatus.COMPLETED) {
+      await this.updateInventory(movement, manager);
     }
 
     return this.transformToDto(movement);
@@ -160,19 +185,6 @@ export class InventoryMovementService {
     return plainToInstance(InventoryMovementResponseDto, data, {
       excludeExtraneousValues: true,
     });
-  }
-
-  private async findOneInTransaction(id: string, manager: any): Promise<InventoryMovementResponseDto> {
-    const movement = await manager.findOne(InventoryMovement, {
-      where: { id, deletedAt: IsNull() },
-      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
-    });
-
-    if (!movement) {
-      throw new NotFoundException(`Movimiento con ID ${id} no encontrado en la transacción`);
-    }
-
-    return this.transformToDto(movement);
   }
 
   async findAll(query?: QueryInventoryMovementDto): Promise<PaginatedInventoryMovementResponseDto> {
@@ -481,12 +493,14 @@ export class InventoryMovementService {
 
   private async performInventoryUpdate(movement: InventoryMovement, manager: any): Promise<void> {
     try {
-      let inventory = await manager.findOne(Inventory, {
-        where: {
-          product: { id: movement.product.id },
-          branch: { id: movement.branch.id },
-        },
-      });
+      let inventory = await manager
+        .getRepository(Inventory)
+        .createQueryBuilder('inv')
+        .select(['inv.id', 'inv.stock'])
+        .where('inv.product_id = :productId', { productId: movement.product.id })
+        .andWhere('inv.branch_id = :branchId', { branchId: movement.branch.id })
+        .andWhere('inv.deletedAt IS NULL')
+        .getOne();
 
       if (!inventory) {
         inventory = manager.create(Inventory, {
@@ -516,7 +530,15 @@ export class InventoryMovementService {
       }
 
       inventory.lastMovementDate = new Date();
-      await manager.save(inventory);
+      if (inventory.id) {
+        await manager.update(Inventory, inventory.id, {
+          stock: inventory.stock,
+          lastMovementDate: inventory.lastMovementDate,
+        });
+      } else {
+        const created = await manager.getRepository(Inventory).save(inventory);
+        inventory.id = created.id;
+      }
 
       await manager.update(InventoryMovement, movement.id, {
         previousStock,

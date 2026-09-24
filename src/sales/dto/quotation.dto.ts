@@ -270,4 +270,8 @@ export class ConvertQuotationDto {
   @IsOptional()
   @IsDateString()
   dueDate?: string;
+
+  @IsOptional()
+  @IsString()
+  deliveryAddress?: string;
 }
