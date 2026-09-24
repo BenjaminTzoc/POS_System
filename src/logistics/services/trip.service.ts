@@ -1085,7 +1085,7 @@ export class TripService {
 
     const tripReturn = await this.tripReturnRepository.findOne({
       where: { id: returnId, trip: { id: tripId }, deletedAt: IsNull() },
-      relations: ['items', 'items.product', 'sale', 'sale.branch'],
+      relations: ['items', 'items.product', 'sale', 'sale.branch', 'tripItem'],
     });
     if (!tripReturn) throw new NotFoundException(`Devolución con ID ${returnId} no encontrada en este viaje`);
     if (tripReturn.status === TripReturnStatus.RECEIVED_IN_WAREHOUSE) {
@@ -1102,11 +1102,26 @@ export class TripService {
     await qr.startTransaction();
 
     try {
+      const discrepancies: string[] = [];
+
       for (const item of tripReturn.items) {
-        let receivedQty = Number(item.returnedQuantity);
+        const expectedQty = Number(item.returnedQuantity);
+        let receivedQty = expectedQty;
         if (dto.items && dto.items.length > 0) {
           const match = dto.items.find((i) => i.productId === item.product.id);
           if (match) receivedQty = Number(match.receivedQuantity);
+        }
+
+        if (receivedQty > expectedQty) {
+          throw new BadRequestException(
+            `La cantidad recibida (${receivedQty}) no puede superar la declarada en retorno (${expectedQty}) para ${item.product.name}`,
+          );
+        }
+
+        if (receivedQty < expectedQty) {
+          discrepancies.push(
+            `${item.product.name}: Esperado ${expectedQty}, recibido ${receivedQty} (faltante: ${expectedQty - receivedQty})`,
+          );
         }
 
         item.receivedQuantity = receivedQty;
@@ -1129,13 +1144,27 @@ export class TripService {
       tripReturn.status = TripReturnStatus.RECEIVED_IN_WAREHOUSE;
       tripReturn.receivedAt = new Date();
       tripReturn.receivedBy = user?.id ? ({ id: user.id } as any) : null;
-      if (dto.notes) tripReturn.receptionNotes = dto.notes;
+      const discrepancyNote = discrepancies.length
+        ? `Discrepancia en recepción: ${discrepancies.join('; ')}`
+        : null;
+      tripReturn.receptionNotes = [dto.notes, discrepancyNote].filter(Boolean).join(' | ') || null;
       await qr.manager.save(tripReturn);
+
+      if (discrepancies.length) {
+        const invoice = tripReturn.sale?.invoiceNumber || 'sin factura';
+        const incident = qr.manager.create(TripIncident, {
+          trip: { id: tripId } as Trip,
+          tripItem: tripReturn.tripItem?.id ? ({ id: tripReturn.tripItem.id } as TripItem) : null,
+          description: `Faltante al recibir devolución de orden ${invoice}: ${discrepancies.join('; ')}`,
+          status: TripIncidentStatus.OPEN,
+        });
+        await qr.manager.save(incident);
+      }
 
       await qr.commitTransaction();
       return this.findOne(tripId);
     } catch (error) {
-      await qr.rollbackTransaction();
+      if (qr.isTransactionActive) await qr.rollbackTransaction();
       throw error;
     } finally {
       await qr.release();
