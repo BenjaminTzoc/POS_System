@@ -717,7 +717,21 @@ export class SaleService {
   async findOne(id: string): Promise<SaleResponseDto> {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['customer', 'customer.category', 'discountCode', 'branch', 'details', 'details.product', 'details.product.unit', 'details.product.inventories', 'details.product.inventories.branch', 'payments', 'payments.paymentMethod', 'payments.bankAccount', 'discounts'],
+      relations: [
+        'customer',
+        'customer.category',
+        'discountCode',
+        'branch',
+        'details',
+        'details.product',
+        'details.product.unit',
+        'details.currentArea',
+        'payments',
+        'payments.paymentMethod',
+        'payments.bankAccount',
+        'discounts',
+      ],
+      relationLoadStrategy: 'query',
       order: {
         payments: {
           createdAt: 'DESC',
@@ -732,14 +746,44 @@ export class SaleService {
       throw new NotFoundException(`Venta con ID ${id} no encontrada`);
     }
 
-    if (sale.details) {
-      sale.details.forEach((detail) => {
-        const inventory = detail.product.inventories?.find((inv) => inv.branch?.id === sale.branch?.id);
-        (detail.product as any).stock = inventory ? Number(inventory.stock) : 0;
-      });
+    const productIds = (sale.details || []).map((d) => d.product?.id).filter(Boolean);
+    const stockByProduct = new Map<string, number>();
+    if (productIds.length && sale.branch?.id) {
+      const rows = await this.dataSource
+        .getRepository(Inventory)
+        .createQueryBuilder('inv')
+        .select('inv.product_id', 'productId')
+        .addSelect('inv.stock', 'stock')
+        .where('inv.branch_id = :branchId', { branchId: sale.branch.id })
+        .andWhere('inv.product_id IN (:...productIds)', { productIds })
+        .andWhere('inv.deletedAt IS NULL')
+        .getRawMany();
+      for (const row of rows) {
+        stockByProduct.set(row.productId, Number(row.stock) || 0);
+      }
     }
 
-    return plainToInstance(SaleResponseDto, sale);
+    sale.details?.forEach((detail) => {
+      delete (detail as any).sale;
+      if (detail.product) {
+        (detail.product as any).stock = stockByProduct.get(detail.product.id) ?? 0;
+        (detail.product as any).inventories = undefined;
+        (detail.product as any).movements = undefined;
+        (detail.product as any).variants = undefined;
+      }
+    });
+    if (sale.customer) {
+      (sale.customer as any).sales = undefined;
+    }
+    if (sale.branch) {
+      (sale.branch as any).users = undefined;
+      (sale.branch as any).inventories = undefined;
+      (sale.branch as any).movements = undefined;
+      (sale.branch as any).outgoingTransfers = undefined;
+      (sale.branch as any).incomingTransfers = undefined;
+    }
+
+    return plainToInstance(SaleResponseDto, sale, { enableCircularCheck: true });
   }
 
   async findByCustomer(customerId: string): Promise<SaleResponseDto[]> {
@@ -859,7 +903,7 @@ export class SaleService {
       }
 
       sale.status = SaleStatus.CONFIRMED;
-      await queryRunner.manager.save(sale);
+      await queryRunner.manager.update(Sale, { id: sale.id }, { status: SaleStatus.CONFIRMED });
 
       if (sale.customer) {
         await this.customerService.updatePurchaseStats(sale.customer.id, sale.total);
