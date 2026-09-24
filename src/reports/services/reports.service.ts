@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { SalesReportsService } from './sales-reports.service';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ConsolidatedReportsService } from './consolidated-reports.service';
+import { CustomerWeeklySummaryService } from './customer-weekly-summary.service';
+import { TodayPulseService } from './today-pulse.service';
+import { TodayPaymentsService } from './today-payments.service';
 
 @Injectable()
 export class ReportsService {
@@ -9,6 +12,9 @@ export class ReportsService {
     private readonly salesReports: SalesReportsService,
     private readonly inventoryReports: InventoryReportsService,
     private readonly consolidatedReports: ConsolidatedReportsService,
+    private readonly customerWeeklySummary: CustomerWeeklySummaryService,
+    private readonly todayPulse: TodayPulseService,
+    private readonly todayPayments: TodayPaymentsService,
   ) {}
 
   // 1. Actividad en ventas (Trends)
@@ -64,7 +70,7 @@ export class ReportsService {
   }
 
   // 11. Calendario
-  getDashboardCalendar(month: number, year: number, branchId?: string) {
+  getDashboardCalendar(month?: number, year?: number, branchId?: string) {
     return this.consolidatedReports.getDashboardCalendar(month, year, branchId);
   }
 
@@ -81,6 +87,18 @@ export class ReportsService {
   // 14. Consolidado Semanal Customer
   getWeeklyCustomerConsolidated(weekStartDate: string, branchId?: string) {
     return this.consolidatedReports.getWeeklyCustomerConsolidated(weekStartDate, branchId);
+  }
+
+  getWeeklyCustomerSummary(weekStartDate: string, branchId?: string, limit?: number) {
+    return this.customerWeeklySummary.getWeeklySummary(weekStartDate, branchId, limit);
+  }
+
+  getTodayPulse(branchId?: string, lowStockLimit?: number) {
+    return this.todayPulse.getTodayPulse(branchId, lowStockLimit);
+  }
+
+  getTodayPayments(branchId?: string, limit?: number) {
+    return this.todayPayments.getTodayPayments(branchId, limit);
   }
 
   // 15. Tendencias mensuales por producto

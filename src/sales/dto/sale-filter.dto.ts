@@ -47,4 +47,21 @@ export class SaleFilterDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true' || value === true)
+  isPreorder?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  promisedDeliveryStart?: string;
+
+  @IsOptional()
+  @IsDateString()
+  promisedDeliveryEnd?: string;
+
+  @IsOptional()
+  @IsUUID()
+  folderId?: string;
 }

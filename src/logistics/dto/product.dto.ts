@@ -11,10 +11,14 @@ class InitialStockDto {
   @IsUUID()
   branchId: string;
 
-  @IsNotEmpty()
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  quantity: number;
+  quantity?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
 }
 
 const TransformBoolean = () =>
@@ -181,6 +185,12 @@ export class BranchProductResponseDto {
   stock: number;
 
   @Expose()
+  reservedStock?: number;
+
+  @Expose()
+  availableStock?: number;
+
+  @Expose()
   unitAbbreviation: string | null;
 
   @Expose()
@@ -193,8 +203,43 @@ export class BranchProductResponseDto {
   price: number;
 
   @Expose()
+  manageStock?: boolean;
+
+  @Expose()
+  isAvailable?: boolean;
+
+  @Expose()
   @Type(() => BranchProductResponseDto)
   variants?: BranchProductResponseDto[];
+}
+
+export class MinimalProductUnitDto {
+  @Expose()
+  abbreviation: string;
+
+  @Expose()
+  allowsDecimals: boolean;
+}
+
+export class MinimalProductResponseDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  name: string;
+
+  @Expose()
+  sku: string;
+
+  @Expose()
+  imageUrl: string | null;
+
+  @Expose()
+  manageStock: boolean;
+
+  @Expose()
+  @Type(() => MinimalProductUnitDto)
+  unit: MinimalProductUnitDto | null;
 }
 
 export class ProductResponseDto extends BaseEntity {

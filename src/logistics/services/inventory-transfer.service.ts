@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository, MoreThanOrEqual, LessThanOrEqual, Between } from 'typeorm';
 import { InventoryTransfer, InventoryTransferItem, TransferStatus, MovementType, MovementStatus, MovementConcept, Inventory, Product, Branch } from '../entities';
-import { CreateInventoryTransferDto, InventoryTransferResponseDto, InventoryTransferListResponseDto, UpdateTransferStatusDto } from '../dto';
+import { CreateInventoryTransferDto, UpdateInventoryTransferDto, InventoryTransferResponseDto, InventoryTransferListResponseDto, UpdateTransferStatusDto } from '../dto';
 import { InventoryMovementService } from './inventory-movement.service';
 
 @Injectable()
@@ -82,28 +82,111 @@ export class InventoryTransferService {
 
         const savedItem = await queryRunner.manager.save(item);
         transferItems.push(savedItem);
-
-        await this.movementService.create(
-          {
-            productId: product.id,
-            branchId: originBranch.id,
-            quantity: itemDto.quantity,
-            type: MovementType.TRANSFER_OUT,
-            sourceBranchId: originBranch.id,
-            targetBranchId: destinationBranch.id,
-            notes: `Traslado ${transferNumber} (Salida)`,
-            status: MovementStatus.COMPLETED,
-            concept: MovementConcept.TRANSFER,
-            referenceId: savedTransfer.id,
-            referenceNumber: transferNumber,
-          },
-          userId,
-          true,
-        );
       }
 
       await queryRunner.commitTransaction();
       return this.findOne(savedTransfer.id);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async update(id: string, dto: UpdateInventoryTransferDto, userId: string): Promise<InventoryTransferResponseDto> {
+    const transfer = await this.transferRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+      relations: ['originBranch', 'destinationBranch', 'items', 'items.product'],
+    });
+
+    if (!transfer) {
+      throw new NotFoundException(`Traslado con ID ${id} no encontrado`);
+    }
+
+    if (transfer.status !== TransferStatus.PENDING) {
+      throw new BadRequestException(`Solo se pueden editar traslados en estado PENDING. El estado actual es ${transfer.status}`);
+    }
+
+    const originBranchId = dto.originBranchId || transfer.originBranch.id;
+    const destinationBranchId = dto.destinationBranchId || transfer.destinationBranch.id;
+
+    if (originBranchId === destinationBranchId) {
+      throw new BadRequestException('La sucursal de origen y destino no pueden ser la misma');
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      if (dto.originBranchId && dto.originBranchId !== transfer.originBranch.id) {
+        const originBranch = await queryRunner.manager.findOne(Branch, {
+          where: { id: dto.originBranchId },
+        });
+        if (!originBranch) {
+          throw new NotFoundException(`Sucursal de origen con ID ${dto.originBranchId} no encontrada`);
+        }
+        transfer.originBranch = originBranch;
+      }
+
+      if (dto.destinationBranchId && dto.destinationBranchId !== transfer.destinationBranch.id) {
+        const destinationBranch = await queryRunner.manager.findOne(Branch, {
+          where: { id: dto.destinationBranchId },
+        });
+        if (!destinationBranch) {
+          throw new NotFoundException(`Sucursal de destino con ID ${dto.destinationBranchId} no encontrada`);
+        }
+        transfer.destinationBranch = destinationBranch;
+      }
+
+      if (dto.notes !== undefined) {
+        transfer.notes = dto.notes;
+      }
+
+      await queryRunner.manager.save(transfer);
+
+      if (dto.items && dto.items.length > 0) {
+        await queryRunner.manager.delete(InventoryTransferItem, {
+          transfer: { id: transfer.id },
+        });
+
+        const newItems: InventoryTransferItem[] = [];
+        for (const itemDto of dto.items) {
+          const product = await queryRunner.manager.findOne(Product, {
+            where: { id: itemDto.productId },
+          });
+          if (!product) {
+            throw new NotFoundException(`Producto con ID ${itemDto.productId} no encontrado`);
+          }
+
+          const inventory = await queryRunner.manager.findOne(Inventory, {
+            where: {
+              product: { id: product.id },
+              branch: { id: transfer.originBranch.id },
+              deletedAt: IsNull(),
+            },
+          });
+
+          if (!inventory || Number(inventory.stock) < itemDto.quantity) {
+            throw new BadRequestException(
+              `Stock insuficiente para el producto ${product.name} en la sucursal de origen. Disponible: ${inventory ? inventory.stock : 0}`,
+            );
+          }
+
+          const item = this.transferItemRepository.create({
+            transfer: { id: transfer.id } as any,
+            product,
+            quantity: itemDto.quantity,
+          });
+
+          const savedItem = await queryRunner.manager.save(item);
+          newItems.push(savedItem);
+        }
+      }
+
+      await queryRunner.commitTransaction();
+      return this.findOne(id);
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -139,7 +222,7 @@ export class InventoryTransferService {
   async findOne(id: string): Promise<InventoryTransferResponseDto> {
     const transfer = await this.transferRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['originBranch', 'destinationBranch', 'items', 'items.product', 'createdBy'],
+      relations: ['originBranch', 'destinationBranch', 'items', 'items.product', 'items.product.unit', 'createdBy'],
     });
 
     if (!transfer) {
@@ -172,7 +255,52 @@ export class InventoryTransferService {
     await queryRunner.startTransaction();
 
     try {
-      if (dto.status === TransferStatus.RECEIVED) {
+      if (dto.status === TransferStatus.SHIPPED && transfer.status === TransferStatus.PENDING) {
+        // Salida de la sucursal de origen al ponerse en camino / subirse al transporte
+        for (const item of transfer.items) {
+          await this.movementService.create(
+            {
+              productId: item.product.id,
+              branchId: transfer.originBranch.id,
+              quantity: item.quantity,
+              type: MovementType.TRANSFER_OUT,
+              sourceBranchId: transfer.originBranch.id,
+              targetBranchId: transfer.destinationBranch.id,
+              notes: `Traslado ${transfer.transferNumber} (Salida)`,
+              status: MovementStatus.COMPLETED,
+              concept: MovementConcept.TRANSFER,
+              referenceId: transfer.id,
+              referenceNumber: transfer.transferNumber,
+            },
+            userId,
+            true,
+          );
+        }
+      } else if (dto.status === TransferStatus.RECEIVED) {
+        // Si no había sido marcado como SHIPPED previamente, ejecutar primero la salida de origen
+        if (transfer.status === TransferStatus.PENDING) {
+          for (const item of transfer.items) {
+            await this.movementService.create(
+              {
+                productId: item.product.id,
+                branchId: transfer.originBranch.id,
+                quantity: item.quantity,
+                type: MovementType.TRANSFER_OUT,
+                sourceBranchId: transfer.originBranch.id,
+                targetBranchId: transfer.destinationBranch.id,
+                notes: `Traslado ${transfer.transferNumber} (Salida)`,
+                status: MovementStatus.COMPLETED,
+                concept: MovementConcept.TRANSFER,
+                referenceId: transfer.id,
+                referenceNumber: transfer.transferNumber,
+              },
+              userId,
+              true,
+            );
+          }
+        }
+
+        // Entrada a la sucursal de destino
         for (const item of transfer.items) {
           await this.movementService.create(
             {
@@ -193,22 +321,25 @@ export class InventoryTransferService {
           );
         }
       } else if (dto.status === TransferStatus.CANCELLED) {
-        for (const item of transfer.items) {
-          await this.movementService.create(
-            {
-              productId: item.product.id,
-              branchId: transfer.originBranch.id,
-              quantity: item.quantity,
-              type: MovementType.IN,
-              notes: `Cancelación de Traslado ${transfer.transferNumber}`,
-              status: MovementStatus.COMPLETED,
-              concept: MovementConcept.RETURN,
-              referenceId: transfer.id,
-              referenceNumber: transfer.transferNumber,
-            },
-            userId,
-            true,
-          );
+        // Si ya había salido el stock (estaba SHIPPED), devolverlo a la sucursal de origen
+        if (transfer.status === TransferStatus.SHIPPED) {
+          for (const item of transfer.items) {
+            await this.movementService.create(
+              {
+                productId: item.product.id,
+                branchId: transfer.originBranch.id,
+                quantity: item.quantity,
+                type: MovementType.IN,
+                notes: `Cancelación de Traslado ${transfer.transferNumber} (Retorno a origen)`,
+                status: MovementStatus.COMPLETED,
+                concept: MovementConcept.RETURN,
+                referenceId: transfer.id,
+                referenceNumber: transfer.transferNumber,
+              },
+              userId,
+              true,
+            );
+          }
         }
       }
 
@@ -264,6 +395,7 @@ export class InventoryTransferService {
         productName: item.product.name,
         sku: item.product.sku,
         quantity: quantity,
+        receivedQuantity: item.receivedQuantity !== null && item.receivedQuantity !== undefined ? Number(item.receivedQuantity) : null,
         unitAbbreviation: item.product.unit?.abbreviation,
         price,
         subtotal: subtotal,

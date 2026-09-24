@@ -33,6 +33,26 @@ export class CreateInventoryTransferDto {
   items: CreateTransferItemDto[];
 }
 
+export class UpdateInventoryTransferDto {
+  @IsOptional()
+  @IsUUID()
+  originBranchId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  destinationBranchId?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => CreateTransferItemDto)
+  items?: CreateTransferItemDto[];
+}
+
 export class UpdateTransferStatusDto {
   @IsNotEmpty()
   @IsEnum(TransferStatus)
@@ -53,6 +73,9 @@ export class TransferItemResponseDto {
   quantity: number;
 
   @Expose()
+  receivedQuantity?: number | null;
+
+  @Expose()
   unitAbbreviation?: string;
 
   @Expose()
@@ -63,6 +86,29 @@ export class TransferItemResponseDto {
 
   @Expose()
   imageUrl?: string | null;
+}
+
+export class ReceiveTransferItemDto {
+  @IsNotEmpty()
+  @IsUUID()
+  productId: string;
+
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(0)
+  receivedQuantity: number;
+}
+
+export class ReceiveTransferDto {
+  @IsNotEmpty()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => ReceiveTransferItemDto)
+  items: ReceiveTransferItemDto[];
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 export class InventoryTransferResponseDto {

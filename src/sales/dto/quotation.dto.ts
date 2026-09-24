@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateNested } from 'class-validator';
 import { Type, Expose } from 'class-transformer';
 import { QuotationStatus } from '../entities/quotation.entity';
 import { DiscountType } from '../entities/discount-code.entity';
@@ -256,4 +256,18 @@ export class QuotationResponseDto {
   @Expose()
   @Type(() => QuotationAdjustmentResponseDto)
   adjustments: QuotationAdjustmentResponseDto[];
+}
+
+export class ConvertQuotationDto {
+  @IsOptional()
+  @IsBoolean()
+  isPreorder?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  promisedDeliveryDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
 }

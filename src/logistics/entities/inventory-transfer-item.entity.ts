@@ -23,4 +23,14 @@ export class InventoryTransferItem extends BaseEntity {
     transformer: columnNumericTransformer,
   })
   quantity: number;
+
+  @Column({
+    name: 'received_quantity',
+    type: 'decimal',
+    precision: 10,
+    scale: 3,
+    nullable: true,
+    transformer: columnNumericTransformer,
+  })
+  receivedQuantity?: number | null;
 }

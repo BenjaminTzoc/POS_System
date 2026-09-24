@@ -1,10 +1,6 @@
 import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, Min, IsDateString } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { ProductResponseDto } from './product.dto';
-import { BranchResponseDto } from './branch.dto';
-import { InventoryResponseDto } from './inventory.dto';
-import { UserResponseDto } from 'src/auth/dto/user.dto';
 import { MovementType, MovementStatus, MovementConcept } from '../entities/inventory-movement.entity';
 
 export class CreateInventoryMovementDto {
@@ -110,30 +106,111 @@ export class CancelMovementDto {
   reason: string;
 }
 
+export class QueryInventoryMovementDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  limit?: number = 20;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsUUID()
+  branchId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
+
+  @IsOptional()
+  @IsEnum(MovementType)
+  type?: MovementType;
+
+  @IsOptional()
+  @IsEnum(MovementStatus)
+  status?: MovementStatus;
+
+  @IsOptional()
+  @IsEnum(MovementConcept)
+  concept?: MovementConcept;
+
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+}
+
+export class InventoryMovementBranchDto {
+  @Expose()
+  name: string;
+}
+
+export class InventoryMovementUserDto {
+  @Expose()
+  name: string;
+}
+
+export class InventoryMovementUnitDto {
+  @Expose()
+  abbreviation: string;
+}
+
+export class InventoryMovementProductDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  name: string;
+
+  @Expose()
+  sku: string;
+
+  @Expose()
+  barcode: string;
+
+  @Expose()
+  imageUrl: string | null;
+
+  @Expose()
+  @Type(() => InventoryMovementUnitDto)
+  unit: InventoryMovementUnitDto | null;
+}
+
 export class InventoryMovementResponseDto extends BaseEntity {
   @Expose()
-  @Type(() => ProductResponseDto)
-  product: ProductResponseDto;
+  declare id: string;
 
   @Expose()
-  @Type(() => BranchResponseDto)
-  branch: BranchResponseDto;
+  @Type(() => InventoryMovementProductDto)
+  product: InventoryMovementProductDto;
 
   @Expose()
-  @Type(() => InventoryResponseDto)
-  inventory: InventoryResponseDto | null;
+  @Type(() => InventoryMovementBranchDto)
+  branch: InventoryMovementBranchDto;
 
   @Expose()
-  @Type(() => UserResponseDto)
-  createdBy: UserResponseDto | null;
+  @Type(() => InventoryMovementUserDto)
+  createdBy: InventoryMovementUserDto | null;
 
   @Expose()
-  @Type(() => UserResponseDto)
-  completedBy: UserResponseDto | null;
+  @Type(() => InventoryMovementUserDto)
+  completedBy: InventoryMovementUserDto | null;
 
   @Expose()
-  @Type(() => UserResponseDto)
-  cancelledBy: UserResponseDto | null;
+  @Type(() => InventoryMovementUserDto)
+  cancelledBy: InventoryMovementUserDto | null;
 
   @Expose()
   quantity: number;
@@ -152,14 +229,6 @@ export class InventoryMovementResponseDto extends BaseEntity {
 
   @Expose()
   concept: MovementConcept;
-
-  @Expose()
-  @Type(() => BranchResponseDto)
-  sourceBranch: BranchResponseDto | null;
-
-  @Expose()
-  @Type(() => BranchResponseDto)
-  targetBranch: BranchResponseDto | null;
 
   @Expose()
   notes: string;
@@ -196,4 +265,22 @@ export class InventoryMovementResponseDto extends BaseEntity {
 
   @Exclude()
   declare deletedAt: Date | null;
+}
+
+export class PaginatedInventoryMovementResponseDto {
+  @Expose()
+  @Type(() => InventoryMovementResponseDto)
+  items: InventoryMovementResponseDto[];
+
+  @Expose()
+  total: number;
+
+  @Expose()
+  page: number;
+
+  @Expose()
+  limit: number;
+
+  @Expose()
+  totalPages: number;
 }

@@ -7,3 +7,5 @@ export { InventoryController } from './inventory.controller';
 export { InventoryMovementController } from './inventory-movement.controller';
 export { InventoryTransferController } from './inventory-transfer.controller';
 export { RouteDispatchController } from './route-dispatch.controller';
+export { TruckController } from './truck.controller';
+export { TripController } from './trip.controller';

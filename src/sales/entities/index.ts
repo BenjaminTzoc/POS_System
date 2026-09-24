@@ -5,6 +5,8 @@ export { SaleDetail } from './sale-detail.entity';
 export { SalePayment, PaymentStatus } from './sale-payment.entity';
 export { Sale, SaleStatus } from './sale.entity';
 export { SaleDiscount, SaleDiscountType } from './sale-discount.entity';
+export { SaleFolder } from './sale-folder.entity';
+export { SaleFolderItem } from './sale-folder-item.entity';
 export { Quotation, QuotationStatus } from './quotation.entity';
 export { QuotationItem } from './quotation-item.entity';
 export { QuotationDiscount, QuotationAdjustmentType, QuotationValueType } from './quotation-discount.entity';

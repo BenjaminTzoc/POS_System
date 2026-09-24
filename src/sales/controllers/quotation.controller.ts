@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patc
 import { QuotationService } from '../services/quotation.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User as UserDecorator } from 'src/common/decorators/user.decorator';
-import { CreateQuotationDto, QuotationResponseDto, UpdateQuotationStatusDto } from '../dto';
+import { CreateQuotationDto, ConvertQuotationDto, QuotationResponseDto, UpdateQuotationStatusDto } from '../dto';
 import { QuotationStatus } from '../entities';
 import type { Response } from 'express';
 
@@ -72,7 +72,11 @@ export class QuotationController {
   }
 
   @Post(':id/convert')
-  convert(@Param('id', ParseUUIDPipe) id: string, @UserDecorator() user: any): Promise<{ saleId: string }> {
-    return this.quotationService.convertToSale(id, user.id);
+  convert(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UserDecorator() user: any,
+    @Body() dto: ConvertQuotationDto = {},
+  ): Promise<{ saleId: string }> {
+    return this.quotationService.convertToSale(id, user.id, dto);
   }
 }

@@ -1,4 +1,4 @@
-import { IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, IsArray, ValidateNested, ArrayMinSize } from 'class-validator';
+import { IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, IsArray, ValidateNested, ArrayMinSize, IsBoolean } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { UnitResponseDto } from '.';
@@ -26,6 +26,10 @@ export class CreateInventoryDto {
   @IsNumber()
   @Min(0)
   maxStock?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
 }
 
 export class BulkCreateInventoryItemDto {
@@ -47,6 +51,10 @@ export class BulkCreateInventoryItemDto {
   @IsNumber()
   @Min(0)
   maxStock?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
 }
 
 export class BulkCreateInventoryDto {
@@ -77,67 +85,37 @@ export class UpdateInventoryDto {
   @IsNumber()
   @Min(0)
   maxStock?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
 }
 
-class InventoryBranchResponse extends BaseEntity {
+export class InventoryBranchResponse {
+  @Expose()
+  id: string;
+
   @Expose()
   name: string;
-
-  @Exclude()
-  address: string;
-
-  @Exclude()
-  phone: string;
-
-  @Exclude()
-  email: string;
-
-  @Exclude()
-  declare createdAt: Date;
-
-  @Exclude()
-  declare updatedAt: Date;
-
-  @Exclude()
-  declare deletedAt: Date | null;
 }
 
-class InventoryCategoryResponse extends BaseEntity {
+export class InventoryUnitResponse {
   @Expose()
-  name: string;
-
-  @Exclude()
-  description: string;
-
-  @Exclude()
-  @Type(() => UnitResponseDto)
-  defaultUnit: UnitResponseDto | null;
-
-  @Exclude()
-  declare createdAt: Date;
-
-  @Exclude()
-  declare updatedAt: Date;
-
-  @Exclude()
-  declare deletedAt: Date | null;
+  abbreviation: string;
 }
 
-class InventoryProductResponse extends BaseEntity {
+export class InventoryProductResponse {
+  @Expose()
+  id: string;
+
   @Expose()
   name: string;
-
-  @Exclude()
-  description: string;
 
   @Expose()
   sku: string;
 
   @Expose()
   barcode: string;
-
-  @Exclude()
-  cost: number;
 
   @Expose()
   price: number;
@@ -146,31 +124,16 @@ class InventoryProductResponse extends BaseEntity {
   imageUrl: string | null;
 
   @Expose()
-  @Type(() => InventoryCategoryResponse)
-  category: InventoryCategoryResponse | null;
+  manageStock: boolean;
 
   @Expose()
-  @Type(() => UnitResponseDto)
-  unit: UnitResponseDto | null;
-
-  @Exclude()
-  declare createdAt: Date;
-
-  @Exclude()
-  declare updatedAt: Date;
-
-  @Exclude()
-  declare deletedAt: Date | null;
+  @Type(() => InventoryUnitResponse)
+  unit: InventoryUnitResponse | null;
 }
 
-export class InventoryResponseDto extends BaseEntity {
+export class InventoryResponseDto {
   @Expose()
-  @Type(() => InventoryProductResponse)
-  product: InventoryProductResponse;
-
-  @Expose()
-  @Type(() => InventoryBranchResponse)
-  branch: InventoryBranchResponse;
+  id: string;
 
   @Expose()
   stock: number;
@@ -182,14 +145,16 @@ export class InventoryResponseDto extends BaseEntity {
   maxStock: number;
 
   @Expose()
+  isAvailable: boolean;
+
+  @Expose()
   lastMovementDate: Date;
 
   @Expose()
-  declare createdAt: Date;
+  @Type(() => InventoryBranchResponse)
+  branch: InventoryBranchResponse;
 
-  @Exclude()
-  declare updatedAt: Date;
-
-  @Exclude()
-  declare deletedAt: Date | null;
+  @Expose()
+  @Type(() => InventoryProductResponse)
+  product: InventoryProductResponse;
 }

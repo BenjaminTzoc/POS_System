@@ -4,4 +4,5 @@ export { DiscountCodeController } from './discount-code.controller';
 export { SaleController } from './sale.controller';
 export { SalePaymentController } from './sale-payment.controller';
 export { SaleDetailController } from './sale-detail.controller';
+export { SaleFolderController } from './sale-folder.controller';
 export { QuotationController } from './quotation.controller';

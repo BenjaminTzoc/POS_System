@@ -23,8 +23,18 @@ export class Inventory extends BaseEntity {
   @Column({ name: 'max_stock', type: 'decimal', precision: 10, scale: 3, nullable: true, transformer: columnNumericTransformer })
   maxStock: number | null;
 
+  @Column({ name: 'reserved_stock', type: 'decimal', precision: 10, scale: 3, default: 0, transformer: columnNumericTransformer })
+  reservedStock: number;
+
   @Column({ name: 'last_movement_date', type: 'timestamp', nullable: true })
   lastMovementDate: Date | null;
+
+  @Column({ name: 'is_available', type: 'boolean', default: true })
+  isAvailable: boolean;
+
+  get availableStock(): number {
+    return Math.max(0, (this.stock || 0) - (this.reservedStock || 0));
+  }
 
   @OneToMany(() => InventoryMovement, (movement) => movement.inventory)
   movements: InventoryMovement[];

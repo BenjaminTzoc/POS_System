@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Sale, SaleDetail, SaleStatus, DiscountType, SalePayment, PaymentStatus } from '../entities';
 import { DataSource, DeepPartial, IsNull, Like, Repository } from 'typeorm';
@@ -11,11 +11,14 @@ import { SaleGateway } from '../gateway/sale.gateway';
 import { SaleDiscount } from '../entities/sale-discount.entity';
 import { MailService } from 'src/common/mail/mail.service';
 import { PdfService } from 'src/common/pdf/pdf.service';
+import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 import { PreparationStatus } from '../entities/sale-detail.entity';
 import { AreaService } from 'src/logistics/services/area.service';
 
 @Injectable()
 export class SaleService {
+  private readonly logger = new Logger(SaleService.name);
+
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
@@ -81,22 +84,55 @@ export class SaleService {
 
     if (!dto.details?.length) throw new BadRequestException('La venta debe tener al menos un detalle');
 
+    const isPreorder = !!dto.isPreorder;
+    if (isPreorder && !dto.promisedDeliveryDate) {
+      throw new BadRequestException('La preorden requiere fecha de entrega prometida (promisedDeliveryDate)');
+    }
+
     const stockErrors: string[] = [];
 
+    if (!isPreorder) {
     for (const detailDto of dto.details) {
-      const stockQuery = await this.dataSource.createQueryBuilder().select(['product.id', 'product.name', 'COALESCE(SUM(inventory.stock), 0) AS current_stock']).from('products', 'product').leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId }).where('product.id = :productId', { productId: detailDto.productId }).andWhere('product.deletedAt IS NULL').groupBy('product.id').getRawOne();
+      const stockQuery = await this.dataSource
+        .createQueryBuilder()
+        .select([
+          'product.id',
+          'product.name',
+          'product.manageStock',
+          'COALESCE(SUM(inventory.stock), 0) AS current_stock',
+          'COALESCE(SUM(inventory.reserved_stock), 0) AS reserved_stock',
+          'COALESCE(bool_and(inventory.is_available), true) AS is_available',
+        ])
+        .from('products', 'product')
+        .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId })
+        .where('product.id = :productId', { productId: detailDto.productId })
+        .andWhere('product.deletedAt IS NULL')
+        .groupBy('product.id')
+        .getRawOne();
 
       if (!stockQuery) {
         stockErrors.push(`Producto con ID ${detailDto.productId} no encontrado`);
         continue;
       }
 
-      const currentStock = Number(stockQuery.current_stock);
+      const currentStock = Number(stockQuery.current_stock || 0);
+      const reservedStock = Number(stockQuery.reserved_stock || 0);
+      const availableStock = Math.max(0, currentStock - reservedStock);
       const productName = stockQuery.product_name;
+      const manageStock = stockQuery.product_manageStock === true || stockQuery.product_manageStock === 1;
+      const isAvailable = stockQuery.is_available === true || stockQuery.is_available === 1 || stockQuery.is_available === '1' || stockQuery.is_available === null;
 
-      if (currentStock < detailDto.quantity) {
-        stockErrors.push(`Producto "${productName}" - Stock insuficiente: solicitado ${detailDto.quantity}, disponible ${currentStock}`);
+      if (manageStock === false) {
+        if (!isAvailable) {
+          stockErrors.push(`Producto "${productName}" no está disponible en esta sucursal`);
+        }
+        continue;
       }
+
+      if (availableStock < detailDto.quantity) {
+        stockErrors.push(`Producto "${productName}" - Stock disponible insuficiente: solicitado ${detailDto.quantity}, disponible ${availableStock} (Físico: ${currentStock}, Reservado: ${reservedStock})`);
+      }
+    }
     }
 
     if (stockErrors.length > 0) {
@@ -132,6 +168,9 @@ export class SaleService {
       discountCodeAmount = validation.discountAmount;
     }
 
+    // Generar OTP de 6 dígitos numéricos
+    const deliveryOtp = Math.floor(100000 + Math.random() * 900000).toString();
+
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -142,7 +181,10 @@ export class SaleService {
         date: dto.date ? new Date(dto.date) : new Date(),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         billingStartDate: dto.billingStartDate ? new Date(dto.billingStartDate) : null,
+        promisedDeliveryDate: dto.promisedDeliveryDate ? new Date(dto.promisedDeliveryDate) : null,
+        isPreorder,
         status: SaleStatus.PENDING,
+        deliveryOtp,
         notes: dto.notes || null,
         customer: dto.customerId ? { id: dto.customerId } : undefined,
         guestCustomer: dto.guestCustomer ?? undefined,
@@ -200,6 +242,20 @@ export class SaleService {
         });
 
         await qr.manager.save(detail);
+
+        // Aumentar stock reservado solo en ventas inmediatas (no preórdenes)
+        if (!isPreorder && product.manageStock) {
+          await qr.manager.increment(
+            Inventory,
+            {
+              product: { id: product.id },
+              branch: { id: dto.branchId },
+              deletedAt: IsNull(),
+            },
+            'reservedStock',
+            detailDto.quantity,
+          );
+        }
 
         subtotal += lineSubtotal;
         lineDiscounts += lineDiscount;
@@ -316,7 +372,13 @@ export class SaleService {
     for (const detailDto of dto.details) {
       const stockQuery = await this.dataSource
         .createQueryBuilder()
-        .select(['product.id', 'product.name', 'product.manageStock', 'COALESCE(SUM(inventory.stock), 0) AS current_stock'])
+        .select([
+          'product.id',
+          'product.name',
+          'product.manageStock',
+          'COALESCE(SUM(inventory.stock), 0) AS current_stock',
+          'COALESCE(bool_and(inventory.is_available), true) AS is_available',
+        ])
         .from('products', 'product')
         .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId })
         .where('product.id = :productId', { productId: detailDto.productId })
@@ -333,9 +395,15 @@ export class SaleService {
       const currentStock = Number(stockQuery.current_stock || 0);
       const productName = stockQuery.product_name;
       const manageStock = stockQuery.product_manageStock === true || stockQuery.product_manageStock === 1;
+      const isAvailable = stockQuery.is_available === true || stockQuery.is_available === 1 || stockQuery.is_available === '1' || stockQuery.is_available === null;
 
-      // Si el producto no gestiona stock, ignoramos el resto de la validación
-      if (manageStock === false) continue;
+      // Si el producto no gestiona stock, verificamos si está habilitado en esta sucursal
+      if (manageStock === false) {
+        if (!isAvailable) {
+          stockErrors.push(`Producto "${productName}" no está disponible en esta sucursal`);
+        }
+        continue;
+      }
 
       if (currentStock < detailDto.quantity) {
         stockErrors.push(`Producto "${productName}" - Stock insuficiente: solicitado ${detailDto.quantity}, disponible ${currentStock}`);
@@ -416,25 +484,26 @@ export class SaleService {
 
         await qr.manager.save(detail);
 
-        // 4. Inventory Movements (Immediately)
-        await this.inventoryMovementService.create(
-          {
-            productId: detailDto.productId,
-            branchId: dto.branchId,
-            quantity: detailDto.quantity,
-            type: MovementType.OUT,
-            notes: `Venta Rápida ${sale.invoiceNumber}`,
-            unitCost: product.cost,
-            totalCost: detailDto.quantity * product.cost,
-            status: MovementStatus.COMPLETED,
-            referenceId: savedSale.id,
-            referenceNumber: sale.invoiceNumber,
-            concept: MovementConcept.SALE,
-          },
-          userId,
-          true,
-          qr.manager,
-        );
+        if (product.manageStock) {
+          await this.inventoryMovementService.create(
+            {
+              productId: detailDto.productId,
+              branchId: dto.branchId,
+              quantity: detailDto.quantity,
+              type: MovementType.OUT,
+              notes: `Venta Rápida ${sale.invoiceNumber}`,
+              unitCost: product.cost,
+              totalCost: detailDto.quantity * product.cost,
+              status: MovementStatus.COMPLETED,
+              referenceId: savedSale.id,
+              referenceNumber: sale.invoiceNumber,
+              concept: MovementConcept.SALE,
+            },
+            userId,
+            true,
+            qr.manager,
+          );
+        }
 
         subtotal += lineSubtotal;
         lineDiscounts += lineDiscount;
@@ -529,7 +598,7 @@ export class SaleService {
   }
 
   async findAll(filterDto: SaleFilterDto): Promise<any> {
-    const { status, branchId, startDate, endDate, areaId, onlyAreaDetails, groupBy, page = 1, limit = 50, search } = filterDto;
+    const { status, branchId, startDate, endDate, areaId, onlyAreaDetails, groupBy, page = 1, limit = 50, search, isPreorder, promisedDeliveryStart, promisedDeliveryEnd, folderId } = filterDto;
 
     // 1. Build Query
     const query = this.saleRepository
@@ -559,6 +628,19 @@ export class SaleService {
       });
     }
 
+    if (isPreorder !== undefined) {
+      query.andWhere('sale.isPreorder = :isPreorder', { isPreorder });
+    }
+
+    if (promisedDeliveryStart) {
+      const start = new Date(`${promisedDeliveryStart}T00:00:00.000Z`);
+      query.andWhere('sale.promisedDeliveryDate >= :promisedStart', { promisedStart: start });
+    }
+    if (promisedDeliveryEnd) {
+      const end = new Date(`${promisedDeliveryEnd}T23:59:59.999Z`);
+      query.andWhere('sale.promisedDeliveryDate <= :promisedEnd', { promisedEnd: end });
+    }
+
     // Date Filters
     if (startDate || endDate) {
       if (startDate) {
@@ -569,12 +651,16 @@ export class SaleService {
         const end = new Date(`${endDate}T23:59:59.999Z`);
         query.andWhere('sale.date <= :end', { end });
       }
-    } else if (!search) {
+    } else if (!search && isPreorder === undefined && !promisedDeliveryStart && !promisedDeliveryEnd && !folderId) {
       // Default: Last 6 months
       const start = new Date();
       start.setMonth(start.getMonth() - 6);
       start.setHours(0, 0, 0, 0);
       query.andWhere('sale.date >= :start', { start });
+    }
+
+    if (folderId) {
+      query.innerJoin('sale_folder_items', 'folderItem', 'folderItem.sale_id = sale.id AND folderItem.folder_id = :folderId', { folderId });
     }
 
     if (areaId) query.andWhere('details.currentArea = :areaId', { areaId });
@@ -691,29 +777,85 @@ export class SaleService {
       throw new BadRequestException('Solo se pueden confirmar ventas pendientes');
     }
 
+    const confirmBranchId = branchId || sale.branch.id;
+
+    if (sale.isPreorder) {
+      const stockErrors: string[] = [];
+      for (const detail of sale.details) {
+        if (!detail.product?.manageStock) continue;
+
+        const stockQuery = await this.dataSource
+          .createQueryBuilder()
+          .select([
+            'COALESCE(SUM(inventory.stock), 0) AS current_stock',
+            'COALESCE(SUM(inventory.reserved_stock), 0) AS reserved_stock',
+            'product.name AS product_name',
+          ])
+          .from('products', 'product')
+          .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', {
+            branchId: confirmBranchId,
+          })
+          .where('product.id = :productId', { productId: detail.product.id })
+          .andWhere('product.deletedAt IS NULL')
+          .groupBy('product.id')
+          .getRawOne();
+
+        const currentStock = Number(stockQuery?.current_stock || 0);
+        const reservedStock = Number(stockQuery?.reserved_stock || 0);
+        const availableStock = Math.max(0, currentStock - reservedStock);
+        if (availableStock < Number(detail.quantity)) {
+          stockErrors.push(
+            `Producto "${stockQuery?.product_name || detail.product.name}" - Stock insuficiente para surtir la preorden: solicitado ${detail.quantity}, disponible ${availableStock}`,
+          );
+        }
+      }
+
+      if (stockErrors.length > 0) {
+        throw new BadRequestException({
+          message: 'No se puede confirmar la preorden: no hay stock suficiente. Produzca o reciba inventario primero.',
+          errors: stockErrors,
+        });
+      }
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
       for (const detail of sale.details) {
-        await this.inventoryMovementService.create(
-          {
-            productId: detail.product.id,
-            branchId: branchId || sale.branch.id,
-            quantity: detail.quantity,
-            type: MovementType.OUT,
-            notes: `Venta ${sale.invoiceNumber}`,
-            unitCost: detail.product.cost,
-            totalCost: detail.quantity * detail.product.cost,
-            status: MovementStatus.COMPLETED,
-            referenceNumber: sale.invoiceNumber,
-            concept: MovementConcept.SALE,
-          },
-          userId,
-          true,
-          queryRunner.manager,
-        );
+        if (detail.product?.manageStock) {
+          await this.inventoryMovementService.create(
+            {
+              productId: detail.product.id,
+              branchId: branchId || sale.branch.id,
+              quantity: detail.quantity,
+              type: MovementType.OUT,
+              notes: `Venta ${sale.invoiceNumber}`,
+              unitCost: detail.product.cost,
+              totalCost: detail.quantity * detail.product.cost,
+              status: MovementStatus.COMPLETED,
+              referenceNumber: sale.invoiceNumber,
+              concept: MovementConcept.SALE,
+            },
+            userId,
+            true,
+            queryRunner.manager,
+          );
+
+          if (!sale.isPreorder) {
+            await queryRunner.manager.decrement(
+              Inventory,
+              {
+                product: { id: detail.product.id },
+                branch: { id: branchId || sale.branch.id },
+                deletedAt: IsNull(),
+              },
+              'reservedStock',
+              detail.quantity,
+            );
+          }
+        }
       }
 
       sale.status = SaleStatus.CONFIRMED;
@@ -781,6 +923,8 @@ export class SaleService {
     try {
       if (sale.status !== SaleStatus.PENDING) {
         for (const detail of sale.details) {
+          if (!detail.product?.manageStock) continue;
+
           await this.inventoryMovementService.create(
             {
               productId: detail.product.id,
@@ -810,6 +954,22 @@ export class SaleService {
         if (sale.discountCode) {
           await this.discountCodeService.revertDiscountCodeUsage(sale.discountCode.code);
         }
+      } else if (!sale.isPreorder) {
+        // Si estaba PENDING y no es preorden, liberar la reserva de inventario
+        for (const detail of sale.details) {
+          if (detail.product?.manageStock) {
+            await queryRunner.manager.decrement(
+              Inventory,
+              {
+                product: { id: detail.product.id },
+                branch: { id: sale.branch.id },
+                deletedAt: IsNull(),
+              },
+              'reservedStock',
+              detail.quantity,
+            );
+          }
+        }
       }
 
       sale.status = SaleStatus.CANCELLED;
@@ -828,7 +988,7 @@ export class SaleService {
   async update(id: string, dto: UpdateSaleDto): Promise<SaleResponseDto> {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['customer', 'branch', 'details', 'discounts'],
+      relations: ['customer', 'branch', 'details', 'details.product', 'discounts'],
     });
 
     if (!sale) {
@@ -855,6 +1015,9 @@ export class SaleService {
       if (dto.date) sale.date = new Date(dto.date);
       if (dto.dueDate !== undefined) sale.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
       if (dto.billingStartDate !== undefined) sale.billingStartDate = dto.billingStartDate ? new Date(dto.billingStartDate) : null;
+      if (dto.promisedDeliveryDate !== undefined) {
+        sale.promisedDeliveryDate = dto.promisedDeliveryDate ? new Date(dto.promisedDeliveryDate) : null;
+      }
       if (dto.notes !== undefined) sale.notes = dto.notes;
       if (dto.applyTax !== undefined) sale.applyTax = dto.applyTax;
 
@@ -865,22 +1028,136 @@ export class SaleService {
       }
 
       const branchId = dto.branchId || sale.branch.id;
+      const wasPreorder = !!sale.isPreorder;
 
-      if (dto.details) {
-        const stockErrors: string[] = [];
-        for (const det of dto.details) {
-          const inventory = await qr.manager.findOne(Inventory, {
-            where: { product: { id: det.productId }, branch: { id: branchId } },
-          });
-          if (!inventory || inventory.stock < det.quantity) {
-            stockErrors.push(`Stock insuficiente para producto ID ${det.productId}`);
+      if (dto.isPreorder !== undefined && !!dto.isPreorder !== wasPreorder) {
+        if (dto.isPreorder && !sale.promisedDeliveryDate) {
+          throw new BadRequestException('La preorden requiere fecha de entrega prometida (promisedDeliveryDate)');
+        }
+
+        if (dto.isPreorder) {
+          for (const d of sale.details || []) {
+            if (!d.product?.manageStock) continue;
+            await qr.manager.decrement(
+              Inventory,
+              { product: { id: d.product.id }, branch: { id: branchId }, deletedAt: IsNull() },
+              'reservedStock',
+              Number(d.quantity),
+            );
           }
         }
-        if (stockErrors.length > 0)
-          throw new BadRequestException({
-            message: 'Error de stock',
-            errors: stockErrors,
-          });
+
+        sale.isPreorder = !!dto.isPreorder;
+      }
+
+      if (sale.isPreorder && !sale.promisedDeliveryDate) {
+        throw new BadRequestException('La preorden requiere fecha de entrega prometida (promisedDeliveryDate)');
+      }
+
+      if (dto.details) {
+        const oldQtyByProduct = new Map<string, number>();
+        for (const d of sale.details || []) {
+          const pid = d.product?.id;
+          if (!pid) continue;
+          oldQtyByProduct.set(pid, (oldQtyByProduct.get(pid) || 0) + Number(d.quantity));
+        }
+
+        const newQtyByProduct = new Map<string, number>();
+        for (const det of dto.details) {
+          newQtyByProduct.set(det.productId, (newQtyByProduct.get(det.productId) || 0) + Number(det.quantity));
+        }
+
+        if (!sale.isPreorder) {
+          const stockErrors: string[] = [];
+
+          for (const [productId, needed] of newQtyByProduct.entries()) {
+            const stockQuery = await qr.manager
+              .createQueryBuilder()
+              .select([
+                'product.id',
+                'product.name',
+                'product.manageStock',
+                'COALESCE(SUM(inventory.stock), 0) AS current_stock',
+                'COALESCE(SUM(inventory.reserved_stock), 0) AS reserved_stock',
+                'COALESCE(bool_and(inventory.is_available), true) AS is_available',
+              ])
+              .from('products', 'product')
+              .leftJoin(
+                'inventories',
+                'inventory',
+                'inventory.product_id = product.id AND inventory.branch_id = :branchId',
+                { branchId },
+              )
+              .where('product.id = :productId', { productId })
+              .andWhere('product.deletedAt IS NULL')
+              .groupBy('product.id')
+              .getRawOne();
+
+            if (!stockQuery) {
+              stockErrors.push(`Producto con ID ${productId} no encontrado`);
+              continue;
+            }
+
+            const currentStock = Number(stockQuery.current_stock || 0);
+            const reservedStock = Number(stockQuery.reserved_stock || 0);
+            const productName = stockQuery.product_name;
+            const manageStock = stockQuery.product_manageStock === true || stockQuery.product_manageStock === 1;
+            const isAvailable =
+              stockQuery.is_available === true ||
+              stockQuery.is_available === 1 ||
+              stockQuery.is_available === '1' ||
+              stockQuery.is_available === null;
+
+            if (manageStock === false) {
+              if (!isAvailable) {
+                stockErrors.push(`Producto "${productName}" no está disponible en esta sucursal`);
+              }
+              continue;
+            }
+
+            const reservedByThisSale = wasPreorder ? 0 : oldQtyByProduct.get(productId) || 0;
+            const availableStock = Math.max(0, currentStock - reservedStock + reservedByThisSale);
+
+            if (availableStock < needed) {
+              stockErrors.push(
+                `Producto "${productName}" - Stock disponible insuficiente: solicitado ${needed}, disponible ${availableStock} (Físico: ${currentStock}, Reservado: ${reservedStock})`,
+              );
+            }
+          }
+
+          if (stockErrors.length > 0) {
+            throw new BadRequestException({
+              message: 'Error de stock en los productos',
+              errors: stockErrors,
+            });
+          }
+
+          const productIds = new Set([...oldQtyByProduct.keys(), ...newQtyByProduct.keys()]);
+          for (const productId of productIds) {
+            const product = await this.productService.findOne(productId);
+            if (!product.manageStock) continue;
+
+            const delta =
+              (newQtyByProduct.get(productId) || 0) - (wasPreorder ? 0 : oldQtyByProduct.get(productId) || 0);
+            if (delta === 0) continue;
+
+            if (delta > 0) {
+              await qr.manager.increment(
+                Inventory,
+                { product: { id: productId }, branch: { id: branchId }, deletedAt: IsNull() },
+                'reservedStock',
+                delta,
+              );
+            } else {
+              await qr.manager.decrement(
+                Inventory,
+                { product: { id: productId }, branch: { id: branchId }, deletedAt: IsNull() },
+                'reservedStock',
+                Math.abs(delta),
+              );
+            }
+          }
+        }
 
         await qr.manager.delete(SaleDetail, { sale: { id: sale.id } });
 
@@ -917,6 +1194,56 @@ export class SaleService {
         sale.subtotal = subtotal;
         sale.taxAmount = taxAmount;
         sale.discountAmount = lineDiscounts;
+      } else if (wasPreorder && !sale.isPreorder) {
+        const stockErrors: string[] = [];
+        for (const d of sale.details || []) {
+          if (!d.product?.manageStock) continue;
+
+          const stockQuery = await qr.manager
+            .createQueryBuilder()
+            .select([
+              'product.name',
+              'COALESCE(SUM(inventory.stock), 0) AS current_stock',
+              'COALESCE(SUM(inventory.reserved_stock), 0) AS reserved_stock',
+            ])
+            .from('products', 'product')
+            .leftJoin(
+              'inventories',
+              'inventory',
+              'inventory.product_id = product.id AND inventory.branch_id = :branchId',
+              { branchId },
+            )
+            .where('product.id = :productId', { productId: d.product.id })
+            .andWhere('product.deletedAt IS NULL')
+            .groupBy('product.id')
+            .getRawOne();
+
+          const currentStock = Number(stockQuery?.current_stock || 0);
+          const reservedStock = Number(stockQuery?.reserved_stock || 0);
+          const availableStock = Math.max(0, currentStock - reservedStock);
+          if (availableStock < Number(d.quantity)) {
+            stockErrors.push(
+              `Producto "${stockQuery?.product_name || d.product.name}" - Stock insuficiente para dejar de ser preorden: solicitado ${d.quantity}, disponible ${availableStock}`,
+            );
+          }
+        }
+
+        if (stockErrors.length > 0) {
+          throw new BadRequestException({
+            message: 'Error de stock en los productos',
+            errors: stockErrors,
+          });
+        }
+
+        for (const d of sale.details || []) {
+          if (!d.product?.manageStock) continue;
+          await qr.manager.increment(
+            Inventory,
+            { product: { id: d.product.id }, branch: { id: branchId }, deletedAt: IsNull() },
+            'reservedStock',
+            Number(d.quantity),
+          );
+        }
       }
 
       const currentLineDiscounts = dto.details ? sale.discountAmount : sale.discountAmount - (sale.discounts?.reduce((acc, d) => acc + Number(d.amountApplied), 0) || 0);
@@ -1261,4 +1588,256 @@ export class SaleService {
       throw error;
     }
   }
+
+  private normalizeWhatsAppPhone(phone: string): string {
+    let cleanPhone = phone.replace(/\D/g, '');
+    const defaultPrefix = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '502';
+    if (cleanPhone.length === 8) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    } else if (cleanPhone.length > 0 && !cleanPhone.startsWith(defaultPrefix)) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    }
+    return cleanPhone;
+  }
+
+  /**
+   * Envía recordatorio el día de inicio de cobro (o el primer día que el cron corra después).
+   * Plantilla Meta (env WHATSAPP_BILLING_REMINDER_TEMPLATE, default recordatorio_inicio_cobro):
+   * body {{1}} nombre, {{2}} número de orden, {{3}} saldo pendiente, {{4}} fecha límite de pago.
+   */
+  async processBillingStartReminders(): Promise<{ scanned: number; sent: number; skipped: number; failed: number }> {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guatemala' });
+
+    const sales = await this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .where('sale.deletedAt IS NULL')
+      .andWhere('sale.billingStartDate IS NOT NULL')
+      .andWhere('sale.billingReminderSentAt IS NULL')
+      .andWhere('sale.pendingAmount > 0')
+      .andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
+      .andWhere('DATE(sale.billing_start_date) <= :today', { today })
+      .getMany();
+
+    let sent = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const sale of sales) {
+      const result = await this.sendBillingStartReminder(sale);
+      if (result === 'sent') sent++;
+      else if (result === 'skipped') skipped++;
+      else failed++;
+    }
+
+    this.logger.log(
+      `Recordatorios de cobro (${today}): ${sales.length} candidatas, ${sent} enviadas, ${skipped} omitidas, ${failed} fallidas`,
+    );
+
+    return { scanned: sales.length, sent, skipped, failed };
+  }
+
+  private async sendBillingStartReminder(sale: Sale): Promise<'sent' | 'skipped' | 'failed'> {
+    const phone = sale.customer?.phone || sale.guestCustomer?.phone;
+    if (!phone) {
+      this.logger.warn(`Orden ${sale.invoiceNumber}: sin teléfono, se omite el recordatorio`);
+      await this.saleRepository.update(sale.id, { billingReminderSentAt: new Date() });
+      return 'skipped';
+    }
+
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (!token || !phoneId) {
+      this.logger.error('WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID no configurados');
+      return 'failed';
+    }
+
+    const templateName = process.env.WHATSAPP_BILLING_REMINDER_TEMPLATE || 'recordatorio_inicio_cobro';
+    const language = process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es_MX';
+    const customerName = sale.customer?.name || sale.guestCustomer?.name || 'Cliente';
+    const pending = Number(sale.pendingAmount || 0).toFixed(2);
+    const dueDate = sale.dueDate
+      ? new Date(sale.dueDate).toLocaleDateString('es-GT', { timeZone: 'America/Guatemala' })
+      : 'por definir';
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: this.normalizeWhatsAppPhone(phone),
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: language },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: customerName },
+              { type: 'text', text: sale.invoiceNumber },
+              { type: 'text', text: pending },
+              { type: 'text', text: dueDate },
+            ],
+          },
+        ],
+      },
+    };
+
+    try {
+      const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        this.logger.error(`WhatsApp recordatorio ${sale.invoiceNumber}: ${errText}`);
+        return 'failed';
+      }
+
+      await this.saleRepository.update(sale.id, { billingReminderSentAt: new Date() });
+      return 'sent';
+    } catch (error) {
+      this.logger.error(`WhatsApp recordatorio ${sale.invoiceNumber}`, error as Error);
+      return 'failed';
+    }
+  }
+
+  async sendCollectionReminder(id: string, user: any): Promise<{
+    message: string;
+    saleId: string;
+    channel: 'whatsapp';
+    to: string;
+    sentAt: string;
+    lastRemindedAt: string;
+  }> {
+    const sale = await this.saleRepository.findOne({
+      where: { id },
+      relations: ['customer', 'branch'],
+    });
+
+    if (!sale) {
+      throw new NotFoundException('No se encontró la orden.');
+    }
+
+    if (!isSuperAdmin(user) && sale.branch?.id !== user?.branch?.id) {
+      throw new ForbiddenException('No tiene acceso a esta sucursal.');
+    }
+
+    if (sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException('No se puede recordar una orden cancelada.');
+    }
+
+    if (Number(sale.pendingAmount) <= 0) {
+      throw new BadRequestException('La orden no tiene saldo pendiente.');
+    }
+
+    if (!sale.dueDate) {
+      throw new BadRequestException('La orden no tiene límite de pago.');
+    }
+
+    const phone = sale.customer?.phone || sale.guestCustomer?.phone;
+    if (!phone || !String(phone).trim()) {
+      throw new BadRequestException('El cliente no tiene teléfono registrado.');
+    }
+
+    if (sale.collectionLastRemindedAt) {
+      const elapsed = Date.now() - new Date(sale.collectionLastRemindedAt).getTime();
+      if (elapsed < 4 * 60 * 60 * 1000) {
+        throw new ConflictException({
+          statusCode: 409,
+          message: 'Ya se envió un recordatorio hace poco.',
+          error: 'Conflict',
+          data: { lastRemindedAt: new Date(sale.collectionLastRemindedAt).toISOString() },
+        });
+      }
+    }
+
+    const to = this.normalizeWhatsAppPhone(phone);
+    await this.dispatchCollectionReminderWhatsApp(sale, to);
+
+    const sentAt = new Date();
+    await this.saleRepository.update(sale.id, { collectionLastRemindedAt: sentAt });
+    const sentAtIso = sentAt.toISOString();
+
+    return {
+      message: 'Recordatorio enviado',
+      saleId: sale.id,
+      channel: 'whatsapp',
+      to,
+      sentAt: sentAtIso,
+      lastRemindedAt: sentAtIso,
+    };
+  }
+
+  private async dispatchCollectionReminderWhatsApp(sale: Sale, to: string) {
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (!token || !phoneId) {
+      throw new InternalServerErrorException('Las credenciales de WhatsApp no están configuradas');
+    }
+
+    const name = sale.customer?.name || sale.guestCustomer?.name || 'Consumidor final';
+    const amount = formatCollectionAmount(Number(sale.pendingAmount));
+    const dueDate = new Date(sale.dueDate as Date).toLocaleDateString('es-GT', {
+      timeZone: 'America/Guatemala',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const bodyText = `Hola ${name}, le recordamos el saldo pendiente de ${amount} de la factura #${sale.invoiceNumber}. Límite de pago: ${dueDate}.`;
+
+    const templateName = process.env.WHATSAPP_COLLECTION_REMINDER_TEMPLATE || 'recordatorio_cobro';
+    const language = process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es_MX';
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: language },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: name },
+              { type: 'text', text: amount },
+              { type: 'text', text: `#${sale.invoiceNumber}. Límite de pago: ${dueDate}` },
+            ],
+          },
+        ],
+      },
+    };
+
+    const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      this.logger.error(`WhatsApp recordatorio cobro ${sale.invoiceNumber}: ${errText}`);
+      throw new InternalServerErrorException(`Fallo al enviar el mensaje de WhatsApp: ${errText}`);
+    }
+
+    this.logger.log(`Recordatorio de cobro enviado ${sale.invoiceNumber} → ${to} (${bodyText})`);
+  }
+}
+
+function formatCollectionAmount(amount: number): string {
+  const cents = Math.round(amount * 100) % 100;
+  const formatted = new Intl.NumberFormat('es-GT', {
+    minimumFractionDigits: cents === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+  return `Q${formatted}`;
 }

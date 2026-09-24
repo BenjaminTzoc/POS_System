@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module';
 import jwtConfig from './auth/jwt.config';
 import { APP_GUARD } from '@nestjs/core';
@@ -32,6 +33,7 @@ import { SettingsModule } from './settings/settings.module';
         password: configService.get('DB_PASSWORD', 'admin123'),
         database: configService.get('DB_NAME', 'sistema-inventario'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        autoLoadEntities: true,
         synchronize: true,
         logging: configService.get('DB_LOGGING') === 'true' ? true : ['error'],
         ssl: configService.get('DB_SSL') === 'true',
@@ -44,6 +46,7 @@ import { SettingsModule } from './settings/settings.module';
       inject: [ConfigService],
     }),
     AuthModule,
+    ScheduleModule.forRoot(),
     LogisticsModule,
     PurchasesModule,
     SalesModule,

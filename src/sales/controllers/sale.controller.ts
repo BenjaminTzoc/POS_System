@@ -18,6 +18,13 @@ export class SaleController {
     return nextNumber;
   }
 
+  @Post('jobs/billing-reminders')
+  @Permissions('orders.view')
+  @HttpCode(HttpStatus.OK)
+  runBillingReminders() {
+    return this.saleService.processBillingStartReminders();
+  }
+
   @Post()
   @Permissions('orders.create')
   @HttpCode(HttpStatus.CREATED)
@@ -164,6 +171,13 @@ export class SaleController {
     @Body('pdfBase64') pdfBase64?: string,
   ): Promise<{ message: string }> {
     return this.saleService.sendSaleWhatsApp(id, pdfBase64);
+  }
+
+  @Post(':id/collection-reminder')
+  @Permissions('orders.view')
+  @HttpCode(HttpStatus.CREATED)
+  sendCollectionReminder(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.saleService.sendCollectionReminder(id, req.user);
   }
 }
 

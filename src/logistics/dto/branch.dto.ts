@@ -94,3 +94,17 @@ export class BranchResponseDto extends BaseEntity {
   @Expose()
   declare deletedAt: Date | null;
 }
+
+export class MinimalBranchResponseDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  name: string;
+
+  @Expose()
+  isPlant: boolean;
+
+  @Expose()
+  isCentral: boolean;
+}

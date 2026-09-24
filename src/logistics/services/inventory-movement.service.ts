@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Inventory, InventoryMovement } from '../entities';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { BranchService, InventoryService, ProductService } from '.';
-import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto } from '../dto';
+import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto, QueryInventoryMovementDto, PaginatedInventoryMovementResponseDto } from '../dto';
 import { MovementStatus, MovementType, MovementConcept } from '../entities/inventory-movement.entity';
 import { plainToInstance } from 'class-transformer';
 
@@ -34,6 +34,14 @@ export class InventoryMovementService {
       product = await this.productService.findOne(dto.productId);
     } catch (error) {
       throw new BadRequestException(`El producto con ID ${dto.productId} no existe`);
+    }
+
+    if (!product.manageStock) {
+      throw new BadRequestException(`El producto "${product.name}" no gestiona control de stock numérico y no admite movimientos de kárdex.`);
+    }
+
+    if (product.isMaster) {
+      throw new BadRequestException(`El producto "${product.name}" es un producto maestro y no admite movimientos directos de inventario.`);
     }
 
     let branch;
@@ -86,25 +94,52 @@ export class InventoryMovementService {
       }
     }
 
-    const quantity = Math.abs(dto.quantity);
+    const previousStock = inventory ? Number(inventory.stock) : 0;
+
+    let newStock = previousStock;
+    if (dto.type === MovementType.IN || dto.type === MovementType.TRANSFER_IN) {
+      newStock += dto.quantity;
+    } else if (dto.type === MovementType.OUT || dto.type === MovementType.TRANSFER_OUT) {
+      newStock -= dto.quantity;
+    } else if (dto.type === MovementType.ADJUSTMENT) {
+      newStock = dto.quantity;
+    }
+
+    // Validar que el stock no sea negativo
+    if (newStock < 0) {
+      throw new BadRequestException(`Stock insuficiente. Stock actual: ${previousStock}, Cantidad solicitada: ${dto.quantity}`);
+    }
+
+    const unitCost = dto.unitCost ?? Number(product.cost);
+    const totalCost = dto.totalCost ?? (dto.type === MovementType.ADJUSTMENT 
+      ? Math.abs(dto.quantity - previousStock) * unitCost
+      : dto.quantity * unitCost);
+
     const movement = repo.create({
-      product: product,
-      branch: branch,
-      inventory: inventory ? inventory : null,
-      quantity: quantity,
+      product: { id: dto.productId },
+      branch: { id: dto.branchId },
+      inventory: dto.inventoryId ? { id: dto.inventoryId } : undefined,
+      quantity: dto.quantity,
       type: dto.type,
       status: dto.status || MovementStatus.PENDING,
       referenceId: dto.referenceId,
       referenceNumber: dto.referenceNumber,
       concept: dto.concept,
-      sourceBranch: sourceBranch ? sourceBranch : null,
-      targetBranch: targetBranch ? targetBranch : null,
-      createdBy: userId ? ({ id: userId } as any) : null,
+      sourceBranch: dto.sourceBranchId ? { id: dto.sourceBranchId } : undefined,
+      targetBranch: dto.targetBranchId ? { id: dto.targetBranchId } : undefined,
       notes: dto.notes,
       movementDate: dto.movementDate ? new Date(dto.movementDate) : new Date(),
-      unitCost: dto.unitCost || product.cost,
-      totalCost: dto.totalCost || (dto.unitCost ? dto.unitCost * quantity : product.cost * quantity),
+      unitCost,
+      totalCost,
+      previousStock,
+      newStock,
+      createdBy: userId ? ({ id: userId } as any) : null,
     });
+
+    if (movement.status === MovementStatus.COMPLETED) {
+      movement.completedAt = new Date();
+      movement.completedBy = userId ? ({ id: userId } as any) : null;
+    }
 
     const savedMovement = await repo.save(movement);
 
@@ -116,42 +151,111 @@ export class InventoryMovementService {
       return this.findOneInTransaction(savedMovement.id, manager);
     }
 
-    return this.findOne(savedMovement.id);
+    return this.transformToDto(movement);
+  }
+
+  private transformToDto(movement: InventoryMovement): InventoryMovementResponseDto;
+  private transformToDto(movements: InventoryMovement[]): InventoryMovementResponseDto[];
+  private transformToDto(data: any): any {
+    return plainToInstance(InventoryMovementResponseDto, data, {
+      excludeExtraneousValues: true,
+    });
   }
 
   private async findOneInTransaction(id: string, manager: any): Promise<InventoryMovementResponseDto> {
     const movement = await manager.findOne(InventoryMovement, {
       where: { id, deletedAt: IsNull() },
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
     });
 
     if (!movement) {
       throw new NotFoundException(`Movimiento con ID ${id} no encontrado en la transacción`);
     }
 
-    return plainToInstance(InventoryMovementResponseDto, movement);
+    return this.transformToDto(movement);
   }
 
-  async findAll(): Promise<InventoryMovementResponseDto[]> {
-    const movements = await this.movementRepository.find({
-      where: { deletedAt: IsNull() },
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
-      order: { movementDate: 'DESC', createdAt: 'DESC' },
-    });
-    return plainToInstance(InventoryMovementResponseDto, movements);
+  async findAll(query?: QueryInventoryMovementDto): Promise<PaginatedInventoryMovementResponseDto> {
+    const page = Math.max(1, Number(query?.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query?.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const qb = this.movementRepository.createQueryBuilder('movement')
+      .leftJoinAndSelect('movement.product', 'product')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('movement.branch', 'branch')
+      .leftJoinAndSelect('movement.createdBy', 'createdBy')
+      .leftJoinAndSelect('movement.completedBy', 'completedBy')
+      .leftJoinAndSelect('movement.cancelledBy', 'cancelledBy')
+      .where('movement.deletedAt IS NULL');
+
+    if (query?.branchId) {
+      qb.andWhere('movement.branch_id = :branchId', { branchId: query.branchId });
+    }
+
+    if (query?.productId) {
+      qb.andWhere('movement.product_id = :productId', { productId: query.productId });
+    }
+
+    if (query?.type) {
+      qb.andWhere('movement.type = :type', { type: query.type });
+    }
+
+    if (query?.status) {
+      qb.andWhere('movement.status = :status', { status: query.status });
+    }
+
+    if (query?.concept) {
+      qb.andWhere('movement.concept = :concept', { concept: query.concept });
+    }
+
+    if (query?.startDate) {
+      qb.andWhere('movement.movementDate >= :startDate', { startDate: new Date(query.startDate) });
+    }
+
+    if (query?.endDate) {
+      const end = new Date(query.endDate);
+      end.setHours(23, 59, 59, 999);
+      qb.andWhere('movement.movementDate <= :endDate', { endDate: end });
+    }
+
+    if (query?.search) {
+      const search = `%${query.search.trim().toLowerCase()}%`;
+      qb.andWhere(
+        '(LOWER(product.name) LIKE :search OR LOWER(product.sku) LIKE :search OR LOWER(product.barcode) LIKE :search OR LOWER(movement.referenceNumber) LIKE :search OR LOWER(movement.notes) LIKE :search)',
+        { search },
+      );
+    }
+
+    qb.orderBy('movement.movementDate', 'DESC')
+      .addOrderBy('movement.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [movements, total] = await qb.getManyAndCount();
+
+    const items = this.transformToDto(movements);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
   }
 
   async findOne(id: string): Promise<InventoryMovementResponseDto> {
     const movement = await this.movementRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
     });
 
     if (!movement) {
       throw new NotFoundException(`Movimiento con ID ${id} no encontrado`);
     }
 
-    return plainToInstance(InventoryMovementResponseDto, movement);
+    return this.transformToDto(movement);
   }
 
   async findByProduct(productId: string): Promise<InventoryMovementResponseDto[]> {
@@ -160,10 +264,10 @@ export class InventoryMovementService {
         product: { id: productId },
         deletedAt: IsNull(),
       },
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
       order: { movementDate: 'DESC' },
     });
-    return plainToInstance(InventoryMovementResponseDto, movements);
+    return this.transformToDto(movements);
   }
 
   async findByBranch(branchId: string): Promise<InventoryMovementResponseDto[]> {
@@ -172,12 +276,11 @@ export class InventoryMovementService {
         branch: { id: branchId },
         deletedAt: IsNull(),
       },
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
       order: { movementDate: 'DESC' },
     });
-    return plainToInstance(InventoryMovementResponseDto, movements);
+    return this.transformToDto(movements);
   }
-
 
   async findByType(type: MovementType): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
@@ -185,19 +288,19 @@ export class InventoryMovementService {
         type,
         deletedAt: IsNull(),
       },
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
       order: { movementDate: 'DESC' },
     });
-    return plainToInstance(InventoryMovementResponseDto, movements);
+    return this.transformToDto(movements);
   }
 
   async findByReferenceId(referenceId: string): Promise<InventoryMovementResponseDto[]> {
     const movements = await this.movementRepository.find({
       where: { referenceId, deletedAt: IsNull() },
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
       order: { createdAt: 'ASC' },
     });
-    return plainToInstance(InventoryMovementResponseDto, movements);
+    return this.transformToDto(movements);
   }
 
 
@@ -303,7 +406,7 @@ export class InventoryMovementService {
     const movement = await this.movementRepository.findOne({
       where: { id },
       withDeleted: true,
-      relations: ['product', 'product.category', 'product.unit', 'branch', 'inventory', 'sourceBranch', 'targetBranch'],
+      relations: ['product', 'product.unit', 'branch', 'createdBy', 'completedBy', 'cancelledBy'],
     });
 
     if (!movement) {
@@ -482,8 +585,8 @@ export class InventoryMovementService {
     outMovement.referenceId = inMovement.id;
 
     return {
-      outMovement: plainToInstance(InventoryMovementResponseDto, outMovement),
-      inMovement: plainToInstance(InventoryMovementResponseDto, inMovement),
+      outMovement,
+      inMovement,
     };
   }
 

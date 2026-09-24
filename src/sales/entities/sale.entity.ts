@@ -48,8 +48,26 @@ export class Sale extends BaseEntity {
   @Column({ name: 'billing_start_date', type: 'timestamp', nullable: true })
   billingStartDate?: Date | null;
 
+  @Column({ name: 'billing_reminder_sent_at', type: 'timestamp', nullable: true })
+  billingReminderSentAt?: Date | null;
+
+  @Column({ name: 'collection_last_reminded_at', type: 'timestamp', nullable: true })
+  collectionLastRemindedAt?: Date | null;
+
+  @Column({ name: 'promised_delivery_date', type: 'timestamp', nullable: true })
+  promisedDeliveryDate?: Date | null;
+
+  @Column({ name: 'is_preorder', type: 'boolean', default: false })
+  isPreorder: boolean;
+
   @Column({ name: 'delivered_at', type: 'timestamp', nullable: true })
   deliveredAt?: Date | null;
+
+  @Column({ name: 'delivery_otp', type: 'varchar', length: 10, nullable: true })
+  deliveryOtp?: string | null;
+
+  @Column({ name: 'delivery_otp_expires_at', type: 'timestamp', nullable: true })
+  deliveryOtpExpiresAt?: Date | null;
 
   @Column({ type: 'enum', enum: SaleStatus, default: SaleStatus.PENDING })
   status: SaleStatus;

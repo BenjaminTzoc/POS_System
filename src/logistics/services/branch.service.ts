@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { Branch } from '../entities';
 import { IsNull, Repository } from 'typeorm';
-import { BranchResponseDto, CreateBranchDto, UpdateBranchDto } from '../dto';
+import { BranchResponseDto, CreateBranchDto, MinimalBranchResponseDto, UpdateBranchDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { formatGuatemalaPhone } from '../../common/utils/phone-formatter.util';
 
@@ -35,10 +35,20 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, savedBranch);
   }
 
-  async findAll(includeDeleted: boolean = false, isPlant?: boolean): Promise<BranchResponseDto[]> {
+  async findAll(includeDeleted: boolean = false, isPlant?: boolean, minimal: boolean = false): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {
     const where: any = {};
     if (isPlant !== undefined) {
       where.isPlant = isPlant;
+    }
+
+    if (minimal) {
+      const branches = await this.branchRepository.find({
+        where,
+        select: ['id', 'name', 'isPlant', 'isCentral'],
+        withDeleted: includeDeleted,
+        order: { name: 'ASC' },
+      });
+      return plainToInstance(MinimalBranchResponseDto, branches, { excludeExtraneousValues: true });
     }
 
     const branches = await this.branchRepository.find({
@@ -139,7 +149,7 @@ export class BranchService {
     return plainToInstance(BranchResponseDto, restoredBranch);
   }
 
-  async searchBranches(query: string, includeDeleted: boolean = false, isPlant?: boolean): Promise<BranchResponseDto[]> {
+  async searchBranches(query: string, includeDeleted: boolean = false, isPlant?: boolean, minimal: boolean = false): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {
     const queryBuilder = this.branchRepository.createQueryBuilder('branch');
 
     if (!includeDeleted) {
@@ -152,11 +162,17 @@ export class BranchService {
       queryBuilder.andWhere('branch.is_plant = :isPlant', { isPlant });
     }
 
-    const branches = await queryBuilder
+    queryBuilder
       .andWhere('(branch.name ILIKE :query OR branch.address ILIKE :query OR branch.email ILIKE :query)', { query: `%${query}%` })
-      .orderBy('branch.name', 'ASC')
-      .getMany();
+      .orderBy('branch.name', 'ASC');
 
+    if (minimal) {
+      queryBuilder.select(['branch.id', 'branch.name', 'branch.isPlant', 'branch.isCentral']);
+      const branches = await queryBuilder.getMany();
+      return plainToInstance(MinimalBranchResponseDto, branches, { excludeExtraneousValues: true });
+    }
+
+    const branches = await queryBuilder.getMany();
     return plainToInstance(BranchResponseDto, branches);
   }
 

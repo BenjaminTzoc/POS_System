@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UploadedFile, UseInterceptors, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ProductService } from '../services';
-import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto } from '../dto';
+import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto, MinimalProductResponseDto } from '../dto';
 import { Permissions, Public } from 'src/auth/decorators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -60,7 +60,8 @@ export class ProductController {
     @Query('isMaster') isMaster?: string,
     @Query('excludeTypes') excludeTypes?: string,
     @Query('manageStock') manageStock?: string,
-  ): Promise<ProductResponseDto[]> {
+    @Query('minimal') minimal?: string,
+  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     const branchId = branchIdParam || user.branch?.id;
@@ -73,8 +74,9 @@ export class ProductController {
     const isMasterBool = isMaster === 'true' ? true : isMaster === 'false' ? false : undefined;
     const manageStockBool = manageStock === 'true' ? true : manageStock === 'false' ? false : undefined;
     const excludeTypesArray = excludeTypes ? excludeTypes.split(',') : undefined;
+    const isMinimal = minimal === 'true';
 
-    return this.productService.findAll(branchId, showDeleted, type, hasRecipeBool, isMasterBool, excludeTypesArray, manageStockBool);
+    return this.productService.findAll(branchId, showDeleted, type, hasRecipeBool, isMasterBool, excludeTypesArray, manageStockBool, isMinimal);
   }
 
   @Get('search')
@@ -86,8 +88,9 @@ export class ProductController {
     @Query('isMaster') isMaster: string,
     @Query('manageStock') manageStock: string,
     @Query('excludeTypes') excludeTypes: string,
+    @Query('minimal') minimal: string,
     @Req() req
-  ): Promise<ProductResponseDto[]> {
+  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
 
@@ -100,8 +103,9 @@ export class ProductController {
     const isMasterBool = isMaster === 'true' ? true : isMaster === 'false' ? false : undefined;
     const manageStockBool = manageStock === 'true' ? true : manageStock === 'false' ? false : undefined;
     const excludeTypesArray = excludeTypes ? excludeTypes.split(',') : undefined;
+    const isMinimal = minimal === 'true';
 
-    return this.productService.searchProducts(query, branchId, showDeleted, type, isMasterBool, manageStockBool, excludeTypesArray);
+    return this.productService.searchProducts(query, branchId, showDeleted, type, isMasterBool, manageStockBool, excludeTypesArray, isMinimal);
   }
 
   @Get('top-selling')
@@ -120,9 +124,15 @@ export class ProductController {
   async getBranchCatalog(
     @Param('branchId', ParseUUIDPipe) branchId: string,
     @Query('isMaster') isMaster?: string,
+    @Query('manageStock') manageStock?: string,
+    @Query('hasStock') hasStock?: string,
+    @Query('inStock') inStock?: string,
   ): Promise<BranchProductResponseDto[]> {
     const isMasterBool = isMaster === 'true' ? true : isMaster === 'false' ? false : undefined;
-    return this.productService.getBranchCatalog(branchId, isMasterBool);
+    const manageStockBool = manageStock === 'true' ? true : manageStock === 'false' ? false : undefined;
+    const hasStockParam = hasStock ?? inStock;
+    const hasStockBool = hasStockParam === 'true' ? true : hasStockParam === 'false' ? false : undefined;
+    return this.productService.getBranchCatalog(branchId, isMasterBool, manageStockBool, hasStockBool);
   }
 
   @Get('branch/:branchId/quotation-catalog')

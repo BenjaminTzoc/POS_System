@@ -15,8 +15,8 @@ import {
   QuotationValueType,
   SaleDiscount,
 } from '../entities';
-import { CreateQuotationDto, QuotationResponseDto, UpdateQuotationStatusDto } from '../dto';
-import { Branch, Product, MovementType, MovementStatus, MovementConcept } from 'src/logistics/entities';
+import { CreateQuotationDto, ConvertQuotationDto, QuotationResponseDto, UpdateQuotationStatusDto } from '../dto';
+import { Branch, Product, Inventory, MovementType, MovementStatus, MovementConcept } from 'src/logistics/entities';
 import { PreparationStatus } from '../entities/sale-detail.entity';
 import { PdfService } from 'src/common/pdf/pdf.service';
 import { MailService } from 'src/common/mail/mail.service';
@@ -379,7 +379,7 @@ export class QuotationService {
     return this.findOne(id);
   }
 
-  async convertToSale(id: string, userId: string): Promise<{ saleId: string }> {
+  async convertToSale(id: string, userId: string, dto?: ConvertQuotationDto): Promise<{ saleId: string }> {
     const quotation = await this.quotationRepository.findOne({
       where: { id },
       relations: ['customer', 'branch', 'items', 'items.product', 'items.product.area', 'discounts'],
@@ -393,6 +393,11 @@ export class QuotationService {
       throw new BadRequestException('No se puede convertir una cotización cancelada');
     }
 
+    const isPreorder = !!dto?.isPreorder;
+    if (isPreorder && !dto?.promisedDeliveryDate) {
+      throw new BadRequestException('La preorden requiere fecha de entrega prometida (promisedDeliveryDate)');
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -403,7 +408,10 @@ export class QuotationService {
       // Create Sale
       const sale = queryRunner.manager.create(Sale, {
         invoiceNumber,
-        status: SaleStatus.CONFIRMED, // Al ser confirmada se descuenta stock
+        status: SaleStatus.PENDING,
+        isPreorder,
+        promisedDeliveryDate: dto?.promisedDeliveryDate ? new Date(dto.promisedDeliveryDate) : null,
+        dueDate: dto?.dueDate ? new Date(dto.dueDate) : null,
         customer: quotation.customer,
         guestCustomer: quotation.guestCustomer,
         branch: quotation.branch,
@@ -440,25 +448,16 @@ export class QuotationService {
         });
         await queryRunner.manager.save(saleDetail);
 
-        // Crear el movimiento de stock (Salida por venta)
-        if (qItem.product.manageStock) {
-          await this.inventoryMovementService.create(
+        if (!isPreorder && qItem.product.manageStock) {
+          await queryRunner.manager.increment(
+            Inventory,
             {
-              productId: qItem.product.id,
-              branchId: quotation.branch.id,
-              quantity: qItem.quantity,
-              type: MovementType.OUT,
-              notes: `Venta (desde Cotización ${quotation.correlative}) ${sale.invoiceNumber}`,
-              unitCost: qItem.product.cost,
-              totalCost: qItem.quantity * qItem.product.cost,
-              status: MovementStatus.COMPLETED,
-              referenceId: savedSale.id,
-              referenceNumber: sale.invoiceNumber,
-              concept: MovementConcept.SALE,
+              product: { id: qItem.product.id },
+              branch: { id: quotation.branch.id },
+              deletedAt: IsNull(),
             },
-            userId,
-            true,
-            queryRunner.manager,
+            'reservedStock',
+            Number(qItem.quantity),
           );
         }
       }
@@ -633,7 +632,7 @@ export class QuotationService {
         to: cleanPhone,
         type: 'template',
         template: {
-          name: 'envio_cotizacion_pos',
+          name: 'envio_cotizacion_cliente',
           language: {
             code: 'es_MX',
           },

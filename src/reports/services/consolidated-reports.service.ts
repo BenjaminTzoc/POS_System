@@ -1,8 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Sale, SaleDetail, SaleStatus } from '../../sales/entities';
+import { PaymentStatus, Sale, SaleDetail, SaleStatus } from '../../sales/entities';
 import { Branch } from '../../logistics/entities';
+
+const TZ = 'America/Guatemala';
+const GUEST_NAME = 'Consumidor final';
 
 @Injectable()
 export class ConsolidatedReportsService {
@@ -15,58 +18,112 @@ export class ConsolidatedReportsService {
     private readonly branchRepository: Repository<Branch>,
   ) {}
 
-  async getDashboardCalendar(month: number, year: number, branchId?: string): Promise<any> {
-    const startOfMonth = new Date(year, month - 1, 1);
-    const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
-    const now = new Date();
-
-    const pendingPaymentsQuery = this.saleRepository.createQueryBuilder('sale').leftJoinAndSelect('sale.customer', 'customer').where('sale.deletedAt IS NULL').andWhere('sale.pending_amount > 0').andWhere('sale.due_date BETWEEN :start AND :end', {
-      start: startOfMonth,
-      end: endOfMonth,
-    });
-
+  async getDashboardCalendar(month?: number, year?: number, branchId?: string): Promise<Record<string, any[]>> {
     if (branchId) {
-      pendingPaymentsQuery.andWhere('sale.branch_id = :branchId', { branchId });
+      const branch = await this.branchRepository.findOne({ where: { id: branchId } });
+      if (!branch) throw new BadRequestException('branchId inexistente');
     }
 
-    const sales = await pendingPaymentsQuery.orderBy('sale.due_date', 'ASC').addOrderBy('sale.pending_amount', 'DESC').getMany();
+    const today = civilToday();
+    const [todayY, todayM] = today.split('-').map(Number);
+    const y = year ?? todayY;
+    const m = month ?? todayM;
+    const startDate = `${y}-${pad2(m)}-01`;
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const endDate = `${y}-${pad2(m)}-${pad2(lastDay)}`;
 
-    const calendarData = {};
+    const qb = this.saleRepository
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .leftJoinAndSelect('sale.branch', 'branch')
+      .leftJoinAndSelect('sale.payments', 'payment')
+      .where('sale.deletedAt IS NULL')
+      .andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
+      .andWhere('sale.pendingAmount > 0')
+      .andWhere('sale.dueDate IS NOT NULL')
+      .andWhere('DATE(sale.dueDate) BETWEEN :startDate AND :endDate', { startDate, endDate });
 
-    sales.forEach((sale) => {
-      if (!sale.dueDate) return;
-      const dateKey = sale.dueDate.toISOString().split('T')[0];
+    if (branchId) qb.andWhere('sale.branch_id = :branchId', { branchId });
+
+    const sales = await qb.getMany();
+    const calendarData: Record<string, any[]> = {};
+
+    for (const sale of sales) {
+      if (!sale.dueDate) continue;
+      const dateKey = civilDate(sale.dueDate);
+      if (dateKey < startDate || dateKey > endDate) continue;
 
       if (!calendarData[dateKey]) {
         calendarData[dateKey] = [
           {
-            type: 'pending_payment',
-            label: 'Cobros Pendientes',
+            type: 'collection',
+            label: 'Por cobrar',
             count: 0,
             total: 0,
-            color: 'orange',
-            dotColor: '#f97316',
+            color: '#fffbeb',
+            dotColor: '#d97706',
             orders: [],
           },
         ];
       }
 
       const event = calendarData[dateKey][0];
-      event.count++;
-      event.total = Number((Number(event.total) + Number(sale.pendingAmount)).toFixed(2));
+      const pendingAmount = round2(Number(sale.pendingAmount));
+      event.count += 1;
+      event.total = round2(Number(event.total) + pendingAmount);
+      event.orders.push(this.toCalendarOrder(sale, dateKey, today));
+    }
 
-      event.orders.push({
-        id: sale.id,
-        invoiceNumber: sale.invoiceNumber,
-        customerName: sale.customer?.name || sale.guestCustomer?.name || 'Consumidor Final',
-        pendingAmount: Number(sale.pendingAmount),
-        total: Number(sale.total),
-        saleDate: sale.date,
-        dueDate: sale.dueDate,
-        isOverdue: sale.dueDate < now,
-      });
-    });
+    for (const events of Object.values(calendarData)) {
+      for (const event of events) {
+        event.orders.sort((a, b) => {
+          if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+          if (b.pendingAmount !== a.pendingAmount) return b.pendingAmount - a.pendingAmount;
+          return String(a.invoiceNumber).localeCompare(String(b.invoiceNumber));
+        });
+      }
+    }
+
     return calendarData;
+  }
+
+  private toCalendarOrder(sale: Sale, dueDateKey: string, today: string) {
+    const lastPayment = this.lastValidPayment(sale);
+    const phone = normalizePhone(sale.customer?.phone || sale.guestCustomer?.phone);
+    const notes = sale.notes?.trim() ? sale.notes.trim() : null;
+
+    return {
+      id: sale.id,
+      saleId: sale.id,
+      invoiceNumber: sale.invoiceNumber,
+      customerName: sale.customer?.name || sale.guestCustomer?.name || GUEST_NAME,
+      customerId: sale.customer?.id ?? null,
+      phone,
+      pendingAmount: round2(Number(sale.pendingAmount)),
+      paidAmount: round2(Number(sale.paidAmount || 0)),
+      total: round2(Number(sale.total)),
+      billingStartDate: sale.billingStartDate ? civilDate(sale.billingStartDate) : null,
+      dueDate: dueDateKey,
+      isOverdue: dueDateKey < today,
+      lastPaymentDate: lastPayment ? civilDate(lastPayment.date) : null,
+      lastPaymentAmount: lastPayment ? round2(Number(lastPayment.amount)) : null,
+      lastRemindedAt: sale.collectionLastRemindedAt ? new Date(sale.collectionLastRemindedAt).toISOString() : null,
+      branchName: sale.branch?.name || '',
+      isPreorder: sale.isPreorder === true,
+      delivered: Boolean(sale.deliveredAt) || sale.status === SaleStatus.DELIVERED,
+      notes,
+    };
+  }
+
+  private lastValidPayment(sale: Sale) {
+    const payments = (sale.payments || []).filter((p) => p.status === PaymentStatus.COMPLETED);
+    if (!payments.length) return null;
+    payments.sort((a, b) => {
+      const byDate = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (byDate !== 0) return byDate;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+    return payments[0];
   }
 
   async getWeeklyBranchConsolidated(month?: number, year?: number, branchId?: string): Promise<any[]> {
@@ -234,4 +291,25 @@ export class ConsolidatedReportsService {
       data: Array.from(customersMap.values()).sort((a, b) => b.total - a.total),
     };
   }
+}
+
+function civilToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+}
+
+function civilDate(value: Date | string): string {
+  return new Date(value).toLocaleDateString('en-CA', { timeZone: TZ });
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function round2(n: number): number {
+  return Number(Number(n).toFixed(2));
+}
+
+function normalizePhone(phone?: string | null): string | null {
+  if (!phone || !phone.trim()) return null;
+  return phone.trim();
 }

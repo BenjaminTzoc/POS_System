@@ -5,7 +5,7 @@ import { SaleStatus } from 'src/sales/entities';
 import { IsNull, Repository } from 'typeorm';
 import { CategoryService } from './category.service';
 import { UnitService } from './unit.service';
-import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto } from '../dto';
+import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto, MinimalProductResponseDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { FilesService } from './files.service';
 import { StockAvailability, ProductType } from '../entities/product.entity';
@@ -28,150 +28,219 @@ export class ProductService {
   async suggestSku(name?: string, categoryId?: string, type?: ProductType): Promise<{ sku: string }> {
     let prefix = 'PROD';
 
-    if (name && name.trim().length >= 2) {
-      // 1. Limpiar el nombre: quitar acentos, caracteres especiales y dejar solo letras
-      const cleanName = name
-        .trim()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') // Quitar acentos
-        .replace(/[^a-zA-Z]/g, '') // Solo letras
-        .toUpperCase();
-
-      if (cleanName.length >= 3) {
-        prefix = cleanName.substring(0, 3);
-      } else {
-        prefix = cleanName.padEnd(3, 'X');
-      }
+    if (type) {
+      const typePrefixes: Record<string, string> = {
+        [ProductType.RAW_MATERIAL]: 'MP',
+        [ProductType.COMPONENT]: 'CMP',
+        [ProductType.INSUMO]: 'INS',
+        [ProductType.FINISHED_PRODUCT]: 'PF',
+      };
+      if (typePrefixes[type]) prefix = typePrefixes[type];
     } else if (categoryId) {
       try {
         const category = await this.categoryService.findOne(categoryId);
         if (category && category.name) {
           prefix = category.name.substring(0, 3).toUpperCase();
         }
-      } catch (e) {}
-    } else if (type) {
-      const typePrefixes = {
-        [ProductType.RAW_MATERIAL]: 'RAW',
-        [ProductType.INSUMO]: 'INS',
-        [ProductType.FINISHED_PRODUCT]: 'FIN',
-        [ProductType.COMPONENT]: 'COM',
-      };
-      prefix = typePrefixes[type] || 'PROD';
+      } catch (e) {
+        // Ignorar error si no encuentra categoría
+      }
+    } else if (name) {
+      prefix = name.substring(0, 3).toUpperCase();
     }
 
     let isUnique = false;
-    let suggestedSku = '';
+    let sku = '';
     let attempts = 0;
 
-    while (!isUnique && attempts < 15) {
-      // Sufijo de 4 caracteres alfanuméricos
+    while (!isUnique && attempts < 10) {
       const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-      suggestedSku = `${prefix}-${randomSuffix}`;
-
-      const existing = await this.productRepository.findOne({
-        where: { sku: suggestedSku },
-        withDeleted: true,
-      });
-
-      if (!existing) {
-        isUnique = true;
-      }
+      sku = `${prefix}-${randomSuffix}`;
+      const existing = await this.productRepository.findOne({ where: { sku }, withDeleted: true });
+      if (!existing) isUnique = true;
       attempts++;
     }
 
-    return { sku: suggestedSku };
+    if (!isUnique) {
+      sku = `${prefix}-${Date.now().toString().slice(-4)}`;
+    }
+
+    return { sku };
   }
 
-  async createWithInventory(dto: CreateProductDto, image?: Express.Multer.File): Promise<ProductResponseDto> {
-    // Generar SKU si no viene en el DTO (usando el nombre como base)
-    if (!dto.sku || dto.sku.trim() === '') {
-      const suggestion = await this.suggestSku(dto.name, dto.categoryId || undefined, dto.type);
+  async create(dto: CreateProductDto): Promise<ProductResponseDto> {
+    if (!dto.sku) {
+      const suggestion = await this.suggestSku(dto.name, dto.categoryId ?? undefined, dto.type);
       dto.sku = suggestion.sku;
-    } else {
-      const existingSku = await this.productRepository.findOne({
+    }
+
+    const existingSku = await this.productRepository.findOne({
+      where: { sku: dto.sku },
+      withDeleted: true,
+    });
+
+    if (existingSku) {
+      if (existingSku.deletedAt) {
+        throw new ConflictException(`El producto con SKU '${dto.sku}' ya existe pero está inactivo. Considere reactivarlo o contacte con el administrador.`);
+      }
+      throw new ConflictException(`El producto con SKU ${dto.sku} ya existe`);
+    }
+
+    if (dto.barcode) {
+      const existingBarcode = await this.productRepository.findOne({
+        where: { barcode: dto.barcode },
+        withDeleted: true,
+      });
+
+      if (existingBarcode) {
+        if (existingBarcode.deletedAt) {
+          throw new ConflictException(`El producto con código de barras '${dto.barcode}' ya pertenece a un producto inactivo. Considere reactivarlo o contacte con el administrador.`);
+        }
+        throw new ConflictException(`El producto con código de barras ${dto.barcode} ya existe`);
+      }
+    }
+
+    let category: any = null;
+    if (dto.categoryId) {
+      try {
+        category = await this.categoryService.findOne(dto.categoryId);
+      } catch (error) {
+        throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
+      }
+    }
+
+    let unit: any = null;
+    if (dto.unitId) {
+      try {
+        unit = await this.unitService.findOne(dto.unitId);
+      } catch (error) {
+        throw new BadRequestException(`La unidad de medida con ID ${dto.unitId} no existe`);
+      }
+    }
+
+    const product = this.productRepository.create({
+      ...dto,
+      category: category ? { id: category.id } : null,
+      unit: unit ? { id: unit.id } : null,
+      parentId: dto.parentId ? dto.parentId : null,
+      stockAvailability: dto.stockAvailability || StockAvailability.IN_STOCK,
+      manageStock: dto.manageStock !== undefined ? dto.manageStock : true,
+      isActive: dto.isActive !== undefined ? dto.isActive : true,
+      isVisible: dto.isVisible !== undefined ? dto.isVisible : true,
+    } as any);
+
+    const savedProduct = await this.productRepository.save(product);
+    return this.findOne((savedProduct as any).id);
+  }
+
+  async createWithInventory(dto: CreateProductDto, imageFile?: Express.Multer.File): Promise<ProductResponseDto> {
+    return await this.productRepository.manager.transaction(async (transactionalEntityManager) => {
+      let imageUrl: string | null = null;
+      if (imageFile) {
+        imageUrl = await this.fileService.saveProductImage(imageFile);
+      }
+
+      if (!dto.sku) {
+        const suggestion = await this.suggestSku(dto.name, dto.categoryId ?? undefined, dto.type);
+        dto.sku = suggestion.sku;
+      }
+
+      const existingSku = await transactionalEntityManager.findOne(Product, {
         where: { sku: dto.sku },
         withDeleted: true,
       });
 
       if (existingSku) {
         if (existingSku.deletedAt) {
-          throw new ConflictException(`El SKU '${dto.sku}' pertenece a un producto eliminado (ID: ${existingSku.id}). Restaure el producto o use otro SKU.`);
+          throw new ConflictException(`El SKU '${dto.sku}' pertenece a un producto inactivo.`);
         }
-        throw new ConflictException(`El SKU '${dto.sku}' ya está en uso`);
+        throw new ConflictException(`El SKU '${dto.sku}' ya está registrado.`);
       }
-    }
 
-    if (dto.barcode) {
-      const existingBarcode = await this.productRepository.findOne({
-        where: { barcode: dto.barcode },
-        withDeleted: false,
-      });
-
-      if (existingBarcode) throw new ConflictException(`El código de barras '${dto.barcode}' ya está en uso`);
-    }
-
-    let imageUrl: string | undefined;
-    if (image) {
-      imageUrl = await this.fileService.saveProductImage(image);
-    }
-
-    let category: any = null;
-    let unit: any = null;
-    if (dto.categoryId) {
-      category = await this.categoryService.findOne(dto.categoryId).catch(() => {
-        throw new BadRequestException(`La categoría con ID ${dto.categoryId} no existe`);
-      });
-    }
-    if (dto.unitId) {
-      unit = await this.unitService.findOne(dto.unitId).catch(() => {
-        throw new BadRequestException(`La unidad con ID ${dto.unitId} no existe`);
-      });
-    }
-
-    const product = this.productRepository.create({
-      name: dto.name,
-      description: dto.description,
-      sku: dto.sku,
-      barcode: dto.barcode,
-      cost: dto.cost,
-      price: dto.price,
-      imageUrl: imageUrl,
-      category: category,
-      unit: unit,
-      manageStock: (dto.manageStock ?? true) as boolean,
-      stockAvailability: dto.stockAvailability ?? StockAvailability.IN_STOCK,
-      isActive: (dto.isActive ?? true) as boolean,
-      isVisible: (dto.isVisible ?? true) as boolean,
-      type: (dto.type ?? ProductType.FINISHED_PRODUCT) as ProductType,
-      isVariant: (dto.isVariant ?? false) as boolean,
-      isMaster: (dto.isMaster ?? false) as boolean,
-      parent: dto.parentId ? ({ id: dto.parentId } as any) : null,
-    });
-
-    const savedProduct = await this.productRepository.save(product);
-
-    if (dto.manageStock && dto.initialStocks?.length) {
-      for (const stockItem of dto.initialStocks) {
-        const branch = await this.branchRepository.findOne({
-          where: { id: stockItem.branchId },
-          withDeleted: false,
-        });
-        if (!branch) throw new NotFoundException(`Sucursal con ID ${stockItem.branchId} no encontrada`);
-
-        const inventory = this.inventoryRepository.create({
-          product: savedProduct,
-          branch,
-          stock: stockItem.quantity,
-          minStock: 0,
-          maxStock: null,
+      if (dto.barcode) {
+        const existingBarcode = await transactionalEntityManager.findOne(Product, {
+          where: { barcode: dto.barcode },
+          withDeleted: true,
         });
 
-        await this.inventoryRepository.save(inventory);
+        if (existingBarcode) {
+          if (existingBarcode.deletedAt) {
+            throw new ConflictException(`El código de barras '${dto.barcode}' pertenece a un producto inactivo.`);
+          }
+          throw new ConflictException(`El código de barras '${dto.barcode}' ya está registrado.`);
+        }
       }
-    }
 
-    return plainToInstance(ProductResponseDto, savedProduct, {
-      excludeExtraneousValues: true,
+      const manageStock = dto.manageStock === 'true' || dto.manageStock === true;
+      const isActive = dto.isActive === 'true' || dto.isActive === true;
+      const isVisible = dto.isVisible === 'true' || dto.isVisible === true;
+      const isVariant = dto.isVariant === 'true' || dto.isVariant === true;
+      const isMaster = dto.isMaster === 'true' || dto.isMaster === true;
+
+      const product = transactionalEntityManager.create(Product, {
+        name: dto.name,
+        description: dto.description || '',
+        sku: dto.sku,
+        barcode: dto.barcode || '',
+        cost: Number(dto.cost),
+        price: Number(dto.price),
+        imageUrl: imageUrl,
+        categoryId: dto.categoryId || null,
+        unitId: dto.unitId || null,
+        parentId: dto.parentId || null,
+        manageStock: manageStock,
+        stockAvailability: dto.stockAvailability || StockAvailability.IN_STOCK,
+        isActive: isActive,
+        isVisible: isVisible,
+        type: dto.type,
+        isVariant: isVariant,
+        isMaster: isMaster,
+      });
+
+      const savedProduct = await transactionalEntityManager.save(Product, product);
+
+      if (dto.initialStocks && Array.isArray(dto.initialStocks)) {
+        for (const stockDto of dto.initialStocks) {
+          const qty = Number(stockDto.quantity || 0);
+          const isAvail = stockDto.isAvailable !== undefined ? stockDto.isAvailable : true;
+          
+          if (manageStock) {
+            if (qty > 0) {
+              const inventory = transactionalEntityManager.create(Inventory, {
+                product: { id: savedProduct.id },
+                branch: { id: stockDto.branchId },
+                stock: qty,
+                isAvailable: isAvail,
+                lastMovementDate: new Date(),
+              });
+              await transactionalEntityManager.save(Inventory, inventory);
+            }
+          } else {
+            const inventory = transactionalEntityManager.create(Inventory, {
+              product: { id: savedProduct.id },
+              branch: { id: stockDto.branchId },
+              stock: 0,
+              isAvailable: isAvail,
+            });
+            await transactionalEntityManager.save(Inventory, inventory);
+          }
+        }
+      }
+
+      const reloaded = await transactionalEntityManager.findOne(Product, {
+        where: { id: savedProduct.id },
+        relations: ['category', 'unit', 'category.defaultUnit'],
+      });
+
+      return plainToInstance(
+        ProductResponseDto,
+        {
+          ...reloaded,
+          stock: 0,
+          inventories: [],
+        },
+        { excludeExtraneousValues: false },
+      );
     });
   }
 
@@ -183,7 +252,83 @@ export class ProductService {
     isMaster?: boolean,
     excludeTypes?: string[],
     manageStock?: boolean,
-  ): Promise<ProductResponseDto[]> {
+    minimal: boolean = false,
+  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
+    if (minimal) {
+      const minimalQuery = this.productRepository
+        .createQueryBuilder('product')
+        .leftJoinAndSelect('product.unit', 'unit')
+        .select([
+          'product.id',
+          'product.name',
+          'product.sku',
+          'product.imageUrl',
+          'product.manageStock',
+          'unit.abbreviation',
+          'unit.allowsDecimals',
+        ])
+        .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
+
+      if (includeDeleted) {
+        minimalQuery.withDeleted();
+      }
+
+      if (isMaster === false) {
+        minimalQuery.andWhere('product.isMaster = :isMaster', { isMaster: false });
+      } else if (isMaster === true) {
+        minimalQuery.andWhere('product.isMaster = :isMaster', { isMaster: true });
+        minimalQuery.andWhere('product.parent_id IS NULL');
+      } else {
+        minimalQuery.andWhere('product.parent_id IS NULL');
+      }
+
+      if (type) {
+        minimalQuery.andWhere('product.type = :type', { type });
+      }
+
+      if (excludeTypes && excludeTypes.length > 0) {
+        const cleanExcludedTypes = excludeTypes.map(t => t.trim().toLowerCase());
+        if (cleanExcludedTypes.length > 0) {
+          minimalQuery.andWhere('LOWER(product.type::text) NOT IN (:...excludedTypes)', { excludedTypes: cleanExcludedTypes });
+        }
+      }
+
+      if (hasRecipe !== undefined) {
+        if (hasRecipe) {
+          minimalQuery.andWhere((qb) => {
+            const subQuery = qb
+              .subQuery()
+              .select('1')
+              .from('product_recipes', 'recipe')
+              .leftJoin('products', 'v', 'v.id = recipe.product_id')
+              .where('recipe.product_id = product.id OR v.parent_id = product.id')
+              .getQuery();
+            return `EXISTS ${subQuery}`;
+          });
+        } else {
+          minimalQuery.andWhere((qb) => {
+            const subQuery = qb
+              .subQuery()
+              .select('1')
+              .from('product_recipes', 'recipe')
+              .leftJoin('products', 'v', 'v.id = recipe.product_id')
+              .where('recipe.product_id = product.id OR v.parent_id = product.id')
+              .getQuery();
+            return `NOT EXISTS ${subQuery}`;
+          });
+        }
+      }
+
+      if (manageStock !== undefined) {
+        minimalQuery.andWhere('product.manageStock = :manageStock', { manageStock });
+      }
+
+      minimalQuery.orderBy('product.name', 'ASC');
+
+      const products = await minimalQuery.getMany();
+      return plainToInstance(MinimalProductResponseDto, products, { excludeExtraneousValues: true });
+    }
+
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -275,6 +420,7 @@ export class ProductService {
           branchId: inv.branch?.id,
           branchName: inv.branch?.name,
           stock: inv.stock,
+          isAvailable: inv.isAvailable,
         })),
       })) || [];
 
@@ -289,6 +435,7 @@ export class ProductService {
             branchId: inv.branch?.id,
             branchName: inv.branch?.name,
             stock: inv.stock,
+            isAvailable: inv.isAvailable,
           })),
         },
         { excludeExtraneousValues: false },
@@ -526,7 +673,53 @@ export class ProductService {
     isMaster?: boolean,
     manageStock?: boolean,
     excludeTypes?: string[],
-  ): Promise<ProductResponseDto[]> {
+    minimal: boolean = false,
+  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
+    if (minimal) {
+      const minimalQuery = this.productRepository
+        .createQueryBuilder('product')
+        .leftJoinAndSelect('product.unit', 'unit')
+        .select([
+          'product.id',
+          'product.name',
+          'product.sku',
+          'product.imageUrl',
+          'product.manageStock',
+          'unit.abbreviation',
+          'unit.allowsDecimals',
+        ])
+        .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL')
+        .andWhere('(product.name ILIKE :query OR product.sku ILIKE :query OR product.barcode ILIKE :query OR product.description ILIKE :query)', { query: `%${query}%` });
+
+      if (type) {
+        minimalQuery.andWhere('product.type = :type', { type });
+      }
+
+      if (isMaster !== undefined) {
+        minimalQuery.andWhere('product.isMaster = :isMaster', { isMaster });
+      }
+
+      if (manageStock !== undefined) {
+        minimalQuery.andWhere('product.manageStock = :manageStock', { manageStock });
+      }
+
+      if (excludeTypes && excludeTypes.length > 0) {
+        const cleanExcludedTypes = excludeTypes.map(t => t.trim().toLowerCase()).filter(t => t.length > 0);
+        if (cleanExcludedTypes.length > 0) {
+          minimalQuery.andWhere('LOWER(product.type::text) NOT IN (:...excludedTypes)', { excludedTypes: cleanExcludedTypes });
+        }
+      }
+
+      if (includeDeleted) {
+        minimalQuery.withDeleted();
+      }
+
+      minimalQuery.orderBy('product.name', 'ASC');
+
+      const products = await minimalQuery.getMany();
+      return plainToInstance(MinimalProductResponseDto, products, { excludeExtraneousValues: true });
+    }
+
     const queryBuilder = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.category', 'category')
@@ -675,7 +868,7 @@ export class ProductService {
     return plainToInstance(ProductResponseDto, updatedProduct);
   }
 
-  async getBranchCatalog(branchId: string, isMaster?: boolean): Promise<BranchProductResponseDto[]> {
+  async getBranchCatalog(branchId: string, isMaster?: boolean, manageStock?: boolean, hasStock?: boolean): Promise<BranchProductResponseDto[]> {
     const query = this.productRepository
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.unit', 'unit')
@@ -695,42 +888,75 @@ export class ProductService {
       query.andWhere('product.parent_id IS NULL');
     }
 
+    if (manageStock !== undefined) {
+      query.andWhere('product.manageStock = :manageStock', { manageStock });
+    }
+
     query.orderBy('product.name', 'ASC');
 
     const products = await query.getMany();
 
-    return products.map((p) => {
+    const mapped = products.map((p) => {
       const dto = new BranchProductResponseDto();
       dto.id = p.id;
       dto.name = p.name;
       dto.sku = p.sku;
       dto.imageUrl = p.imageUrl ?? null;
       dto.price = Number(p.price);
-      dto.stock = p.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
+      dto.manageStock = p.manageStock;
+      const inv = p.inventories?.[0];
+      dto.stock = p.inventories?.reduce((sum, i) => sum + Number(i.stock), 0) || 0;
+      dto.reservedStock = p.inventories?.reduce((sum, i) => sum + Number(i.reservedStock || 0), 0) || 0;
+      dto.availableStock = Math.max(0, dto.stock - dto.reservedStock);
+      dto.isAvailable = p.manageStock ? dto.availableStock > 0 : (inv?.isAvailable ?? true);
       dto.unitName = p.unit?.name || null;
       dto.unitAbbreviation = p.unit?.abbreviation || null;
       dto.allowsDecimals = p.unit?.allowsDecimals || false;
 
       if (p.variants && p.variants.length > 0) {
-        dto.variants = p.variants
-          .filter(v => v.deletedAt === null && v.isActive === true)
-          .map((v) => {
-            const vDto = new BranchProductResponseDto();
-            vDto.id = v.id;
-            vDto.name = v.name;
-            vDto.sku = v.sku;
-            vDto.imageUrl = v.imageUrl ?? null;
-            vDto.price = Number(v.price);
-            vDto.stock = v.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;
-            vDto.unitName = v.unit?.name || p.unit?.name || null;
-            vDto.unitAbbreviation = v.unit?.abbreviation || p.unit?.abbreviation || null;
-            vDto.allowsDecimals = v.unit?.allowsDecimals ?? p.unit?.allowsDecimals ?? false;
-            return vDto;
+        let activeVariants = p.variants.filter(v => v.deletedAt === null && v.isActive === true);
+        if (hasStock === true) {
+          activeVariants = activeVariants.filter(v => {
+            const vStock = v.inventories?.reduce((sum, i) => sum + Number(i.stock), 0) || 0;
+            const vReserved = v.inventories?.reduce((sum, i) => sum + Number(i.reservedStock || 0), 0) || 0;
+            const vAvailable = Math.max(0, vStock - vReserved);
+            return v.manageStock ? vAvailable > 0 : (v.inventories?.[0]?.isAvailable ?? true);
           });
+        }
+
+        dto.variants = activeVariants.map((v) => {
+          const vDto = new BranchProductResponseDto();
+          vDto.id = v.id;
+          vDto.name = v.name;
+          vDto.sku = v.sku;
+          vDto.imageUrl = v.imageUrl ?? null;
+          vDto.price = Number(v.price);
+          vDto.manageStock = v.manageStock;
+          const vInv = v.inventories?.[0];
+          vDto.stock = v.inventories?.reduce((sum, i) => sum + Number(i.stock), 0) || 0;
+          vDto.reservedStock = v.inventories?.reduce((sum, i) => sum + Number(i.reservedStock || 0), 0) || 0;
+          vDto.availableStock = Math.max(0, vDto.stock - vDto.reservedStock);
+          vDto.isAvailable = v.manageStock ? vDto.availableStock > 0 : (vInv?.isAvailable ?? true);
+          vDto.unitName = v.unit?.name || p.unit?.name || null;
+          vDto.unitAbbreviation = v.unit?.abbreviation || p.unit?.abbreviation || null;
+          vDto.allowsDecimals = v.unit?.allowsDecimals ?? p.unit?.allowsDecimals ?? false;
+          return vDto;
+        });
       }
 
       return dto;
     });
+
+    if (hasStock === true) {
+      return mapped.filter((p) => {
+        if (p.variants && p.variants.length > 0) {
+          return p.variants.length > 0;
+        }
+        return p.manageStock ? ((p.availableStock ?? p.stock) > 0) : (p.isAvailable === true);
+      });
+    }
+
+    return mapped;
   }
 
   async getQuotationCatalog(branchId: string): Promise<BranchProductResponseDto[]> {
@@ -748,6 +974,8 @@ export class ProductService {
         'product.sku',
         'product.imageUrl',
         'product.price',
+        'product.manageStock',
+        'inventory.isAvailable',
         'unit.name',
         'unit.abbreviation',
         'unit.allowsDecimals',
@@ -772,7 +1000,11 @@ export class ProductService {
       dto.sku = p.product_sku;
       dto.imageUrl = p.product_imageUrl ?? null;
       dto.price = Number(p.product_price);
+      const manageStock = p.product_manageStock === true || p.product_manageStock === 1;
+      dto.manageStock = manageStock;
       dto.stock = Number(p.stock);
+      const isAvail = p.inventory_is_available ?? p.inventory_isAvailable ?? true;
+      dto.isAvailable = manageStock ? dto.stock > 0 : (isAvail === true || isAvail === 1 || isAvail === '1');
       dto.unitName = p.unit_name;
       dto.unitAbbreviation = p.unit_abbreviation;
       const allowsDec = p.unit_allowsDecimals ?? p.unit_allows_decimals;

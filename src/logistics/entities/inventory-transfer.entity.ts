@@ -8,6 +8,7 @@ export enum TransferStatus {
   PENDING = 'PENDING',
   SHIPPED = 'SHIPPED',
   RECEIVED = 'RECEIVED',
+  DISCREPANCY = 'DISCREPANCY',
   CANCELLED = 'CANCELLED',
 }
 

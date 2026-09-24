@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Inventory } from '../entities';
+import { Inventory, Product } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { ProductService } from './product.service';
 import { BranchService } from './branch.service';
@@ -16,6 +16,14 @@ export class InventoryService {
     private readonly productService: ProductService,
     private readonly branchService: BranchService,
   ) {}
+
+  private transformToDto(inventory: Inventory): InventoryResponseDto;
+  private transformToDto(inventories: Inventory[]): InventoryResponseDto[];
+  private transformToDto(data: any): any {
+    return plainToInstance(InventoryResponseDto, data, {
+      excludeExtraneousValues: true,
+    });
+  }
 
   async create(dto: CreateInventoryDto): Promise<InventoryResponseDto> {
     let product;
@@ -41,7 +49,19 @@ export class InventoryService {
     });
 
     if (existingInventory) {
-      throw new ConflictException(`Ya existe un inventario para el producto: '${product.name}' en la sucursal: '${branch.name}'`);
+      if (product.manageStock === false) {
+        // Para productos sin gestión de stock, actualizar disponibilidad y límites en la sucursal
+        existingInventory.isAvailable = dto.isAvailable ?? existingInventory.isAvailable;
+        if (dto.minStock !== undefined && dto.minStock !== null) {
+          existingInventory.minStock = dto.minStock;
+        }
+        if (dto.maxStock !== undefined) {
+          existingInventory.maxStock = dto.maxStock;
+        }
+        const updated = await this.inventoryRepository.save(existingInventory);
+        return this.findOne(updated.id);
+      }
+      throw new ConflictException(`Ya existe un inventario para el producto '${product.name}' en la sucursal '${branch.name}'. Para modificar el stock actual debe registrar un movimiento de inventario.`);
     }
 
     this.validateStockLimits(dto.stock, dto.minStock, dto.maxStock);
@@ -52,6 +72,7 @@ export class InventoryService {
       stock: dto.stock,
       minStock: dto.minStock || 0,
       maxStock: dto.maxStock || undefined,
+      isAvailable: dto.isAvailable ?? true,
     });
 
     const savedInventory = await this.inventoryRepository.save(inventory);
@@ -96,14 +117,20 @@ export class InventoryService {
       const createdEntities: Inventory[] = [];
 
       for (const item of dto.items) {
-        // Verificar existencia del producto
-        const product = await transactionalEntityManager.getRepository(Inventory).manager.findOne(
-          this.productService['productRepository'].target,
-          { where: { id: item.productId } }
-        ) as any;
-
-        if (!product) {
+        let product;
+        try {
+          product = await transactionalEntityManager.findOne(Product, {
+            where: { id: item.productId, deletedAt: IsNull() },
+          });
+          if (!product) {
+            throw new BadRequestException(`El producto con ID ${item.productId} no existe`);
+          }
+        } catch (error) {
           throw new BadRequestException(`El producto con ID ${item.productId} no existe`);
+        }
+
+        if (product.manageStock) {
+          this.validateStockLimits(item.stock, item.minStock, item.maxStock);
         }
 
         // Verificar si ya existe inventario activo para este producto en la sucursal
@@ -116,7 +143,18 @@ export class InventoryService {
         });
 
         if (existingInventory) {
-          throw new ConflictException(`Ya existe inventario para el producto '${product.name}' en la sucursal '${branch.name}'`);
+          if (product.manageStock === false) {
+            existingInventory.isAvailable = item.isAvailable ?? existingInventory.isAvailable;
+            if (item.minStock !== undefined && item.minStock !== null) {
+              existingInventory.minStock = item.minStock;
+            }
+            if (item.maxStock !== undefined) {
+              existingInventory.maxStock = item.maxStock;
+            }
+            createdEntities.push(existingInventory);
+            continue;
+          }
+          throw new ConflictException(`Ya existe un inventario para el producto '${product.name}' en la sucursal '${branch.name}'. Para modificar el stock actual debe registrar un movimiento de inventario.`);
         }
 
         const newInventory = transactionalEntityManager.create(Inventory, {
@@ -125,6 +163,7 @@ export class InventoryService {
           stock: item.stock,
           minStock: item.minStock || 0,
           maxStock: item.maxStock || undefined,
+          isAvailable: item.isAvailable ?? true,
         });
 
         createdEntities.push(newInventory);
@@ -137,65 +176,51 @@ export class InventoryService {
     const ids = savedInventories.map(inv => inv.id);
     const results = await this.inventoryRepository.find({
       where: ids.map(id => ({ id })),
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
     });
 
-    return plainToInstance(InventoryResponseDto, results);
+    return this.transformToDto(results);
   }
 
-
   async findAll(branchId?: string): Promise<InventoryResponseDto[]> {
-    const queryBuilder = this.inventoryRepository.createQueryBuilder('inventory').leftJoinAndSelect('inventory.product', 'product').leftJoinAndSelect('product.category', 'category').leftJoinAndSelect('product.unit', 'unit').leftJoinAndSelect('inventory.branch', 'branch').where('inventory.deletedAt IS NULL');
+    const queryBuilder = this.inventoryRepository.createQueryBuilder('inventory')
+      .leftJoinAndSelect('inventory.product', 'product')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('inventory.branch', 'branch')
+      .where('inventory.deletedAt IS NULL');
 
     if (branchId) {
       queryBuilder.andWhere('branch.id = :branchId', { branchId });
     }
 
-    const inventories = await queryBuilder.select(['inventory.id', 'inventory.stock', 'inventory.minStock', 'inventory.maxStock', 'inventory.lastMovementDate', 'inventory.createdAt', 'product.id', 'product.imageUrl', 'product.name', 'product.sku', 'product.barcode', 'product.price', 'product.cost', 'product.isActive', 'product.manageStock', 'category.id', 'category.name', 'unit.id', 'unit.name', 'unit.abbreviation', 'unit.allowsDecimals', 'branch.id', 'branch.name']).orderBy('branch.name', 'ASC').addOrderBy('product.name', 'ASC').getMany();
+    const inventories = await queryBuilder
+      .orderBy('branch.name', 'ASC')
+      .addOrderBy('product.name', 'ASC')
+      .getMany();
 
-    return plainToInstance(InventoryResponseDto, inventories);
+    return this.transformToDto(inventories);
   }
 
   async findAllWithoutFilter(user?: any): Promise<InventoryResponseDto[]> {
     const inventories = await this.inventoryRepository.find({
       where: { deletedAt: IsNull() },
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
-      select: {
-        id: true,
-        product: {
-          id: true,
-          imageUrl: true,
-          name: true,
-          price: true,
-          category: {
-            id: true,
-            name: true,
-          },
-        },
-        branch: {
-          id: true,
-          name: true,
-        },
-        stock: true,
-        lastMovementDate: true,
-        createdAt: true,
-      },
+      relations: ['product', 'product.unit', 'branch'],
       order: { createdAt: 'DESC' },
     });
-    return plainToInstance(InventoryResponseDto, inventories);
+    return this.transformToDto(inventories);
   }
 
   async findOne(id: string): Promise<InventoryResponseDto> {
     const inventory = await this.inventoryRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
     });
 
     if (!inventory) {
       throw new NotFoundException(`Inventario con ID ${id} no encontrado`);
     }
 
-    return plainToInstance(InventoryResponseDto, inventory);
+    return this.transformToDto(inventory);
   }
 
   async findByProductAndBranch(productId: string, branchId: string): Promise<InventoryResponseDto> {
@@ -205,14 +230,14 @@ export class InventoryService {
         branch: { id: branchId },
         deletedAt: IsNull(),
       },
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
     });
 
     if (!inventory) {
       throw new NotFoundException(`Inventario no encontrado para el producto ${productId} en la sucursal ${branchId}`);
     }
 
-    return plainToInstance(InventoryResponseDto, inventory);
+    return this.transformToDto(inventory);
   }
 
   async findByProduct(productId: string): Promise<InventoryResponseDto[]> {
@@ -221,11 +246,11 @@ export class InventoryService {
         product: { id: productId },
         deletedAt: IsNull(),
       },
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
       order: { stock: 'DESC' },
     });
 
-    return plainToInstance(InventoryResponseDto, inventories);
+    return this.transformToDto(inventories);
   }
 
   async findByBranch(branchId: string): Promise<InventoryResponseDto[]> {
@@ -234,17 +259,17 @@ export class InventoryService {
         branch: { id: branchId },
         deletedAt: IsNull(),
       },
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
       order: { product: { name: 'ASC' } },
     });
 
-    return plainToInstance(InventoryResponseDto, inventories);
+    return this.transformToDto(inventories);
   }
 
   async update(id: string, dto: UpdateInventoryDto): Promise<InventoryResponseDto> {
     const inventory = await this.inventoryRepository.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['product', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
     });
 
     if (!inventory) {
@@ -255,8 +280,9 @@ export class InventoryService {
 
     Object.assign(inventory, {
       stock: dto.stock ?? inventory.stock,
-      minStock: dto.minStock ?? inventory.minStock,
-      maxStock: dto.maxStock ?? inventory.maxStock,
+      minStock: (dto.minStock !== undefined && dto.minStock !== null) ? dto.minStock : inventory.minStock,
+      maxStock: dto.maxStock !== undefined ? dto.maxStock : inventory.maxStock,
+      isAvailable: dto.isAvailable ?? inventory.isAvailable,
     });
 
     await this.inventoryRepository.save(inventory);
@@ -285,7 +311,7 @@ export class InventoryService {
     const inventory = await this.inventoryRepository.findOne({
       where: { id },
       withDeleted: true,
-      relations: ['product', 'product.category', 'product.unit', 'branch'],
+      relations: ['product', 'product.unit', 'branch'],
     });
 
     if (!inventory) {
@@ -302,7 +328,12 @@ export class InventoryService {
   }
 
   async getLowStock(branchId?: string): Promise<InventoryResponseDto[]> {
-    const query = this.inventoryRepository.createQueryBuilder('inventory').leftJoinAndSelect('inventory.product', 'product').leftJoinAndSelect('product.category', 'category').leftJoinAndSelect('product.unit', 'unit').leftJoinAndSelect('inventory.branch', 'branch').where('inventory.deletedAt IS NULL').andWhere('inventory.stock <= inventory.minStock');
+    const query = this.inventoryRepository.createQueryBuilder('inventory')
+      .leftJoinAndSelect('inventory.product', 'product')
+      .leftJoinAndSelect('product.unit', 'unit')
+      .leftJoinAndSelect('inventory.branch', 'branch')
+      .where('inventory.deletedAt IS NULL')
+      .andWhere('inventory.stock <= inventory.minStock');
 
     if (branchId) {
       query.andWhere('inventory.branch_id = :branchId', { branchId });
@@ -311,7 +342,7 @@ export class InventoryService {
     query.orderBy('inventory.stock', 'ASC');
 
     const inventories = await query.getMany();
-    return plainToInstance(InventoryResponseDto, inventories);
+    return this.transformToDto(inventories);
   }
 
   async getInventoryStats(branchId?: string): Promise<{

@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
-import { BranchResponseDto, CreateBranchDto, UpdateBranchDto } from '../dto';
+import { BranchResponseDto, CreateBranchDto, MinimalBranchResponseDto, UpdateBranchDto } from '../dto';
 import { BranchService } from '../services';
 import { Permissions } from 'src/auth/decorators';
 import { User } from 'src/common/decorators/user.decorator';
@@ -17,17 +17,30 @@ export class BranchController {
   }
 
   @Get()
-  findAll(@Query('includeDeleted') includeDeleted: string, @Query('isPlant') isPlant: string, @User() user: any): Promise<BranchResponseDto[]> {
+  findAll(
+    @Query('includeDeleted') includeDeleted: string,
+    @Query('isPlant') isPlant: string,
+    @Query('minimal') minimal: string,
+    @User() user: any,
+  ): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     const filterIsPlant = isPlant === 'true' ? true : isPlant === 'false' ? false : undefined;
-    return this.branchService.findAll(showDeleted, filterIsPlant);
+    const isMinimal = minimal === 'true';
+    return this.branchService.findAll(showDeleted, filterIsPlant, isMinimal);
   }
 
   @Get('search')
-  search(@Query('q') query: string, @Query('includeDeleted') includeDeleted: string, @Query('isPlant') isPlant: string, @User() user: any): Promise<BranchResponseDto[]> {
+  search(
+    @Query('q') query: string,
+    @Query('includeDeleted') includeDeleted: string,
+    @Query('isPlant') isPlant: string,
+    @Query('minimal') minimal: string,
+    @User() user: any,
+  ): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     const filterIsPlant = isPlant === 'true' ? true : isPlant === 'false' ? false : undefined;
-    return this.branchService.searchBranches(query, showDeleted, filterIsPlant);
+    const isMinimal = minimal === 'true';
+    return this.branchService.searchBranches(query, showDeleted, filterIsPlant, isMinimal);
   }
 
   @Get('stats')

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { Quotation, Sale } from '../../sales/entities';
+import { PaymentStatus } from '../../sales/entities/sale-payment.entity';
+import { SalePaymentReceiptResponseDto } from '../../sales/dto';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { CompanySettingService } from '../../settings/services/company-setting.service';
@@ -195,6 +197,9 @@ export class PdfService {
       if (sale.branch) {
         rightColHeight += Math.max(13, doc.heightOfString(`Sucursal: ${sale.branch.name}`, { width: colWidth }));
       }
+      if (sale.promisedDeliveryDate) {
+        rightColHeight += 13;
+      }
 
       const dynamicBoxHeight = Math.max(85, Math.max(leftColHeight, rightColHeight) + 12);
       doc.roundedRect(35, infoBoxY, 542, dynamicBoxHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
@@ -245,6 +250,14 @@ export class PdfService {
           lineBreak: true,
         });
         emissionY = Math.max(emissionY + 13, doc.y + 2);
+      }
+
+      if (sale.promisedDeliveryDate) {
+        const pDate = new Date(sale.promisedDeliveryDate);
+        const promisedText = `${String(pDate.getDate()).padStart(2, '0')}/${String(pDate.getMonth() + 1).padStart(2, '0')}/${pDate.getFullYear()}`;
+        doc.font('Helvetica-Bold').text('Fecha de Entrega: ', 315, emissionY, { continued: true });
+        doc.font('Helvetica').text(promisedText);
+        emissionY += 13;
       }
 
       doc.font('Helvetica-Bold').text('Estado: ', 315, emissionY, { continued: true });
@@ -352,7 +365,7 @@ export class PdfService {
         }
       });
 
-      // --- 4. Totals and Payments Area ---
+      // --- 4. Totals Area ---
       if (currentY > 560) {
         doc.addPage();
         currentY = drawHeader(20);
@@ -360,36 +373,6 @@ export class PdfService {
 
       currentY += 15;
       const startBottomY = currentY;
-
-      // Izquierda: Detalle de Pagos
-      if (sale.payments && sale.payments.length > 0) {
-        const payBoxWidth = 260;
-        const payBoxHeight = Math.max(75, 28 + sale.payments.length * 20);
-        doc.roundedRect(35, startBottomY, payBoxWidth, payBoxHeight, 6).fillAndStroke(COLOR_PURPLE_BG, COLOR_PURPLE_BORDER);
-        doc.fillColor(COLOR_PURPLE_TEXT).font('Helvetica-Bold').fontSize(8).text('DETALLE DE PAGOS', 47, startBottomY + 9);
-
-        let pY = startBottomY + 23;
-        sale.payments.forEach((p) => {
-          doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5);
-          doc.text(p.paymentMethod?.name || 'Pago', 47, pY, { width: 130 });
-          doc.text(`Q${Number(p.amount).toFixed(2)}`, 175, pY, { width: 110, align: 'right' });
-
-          // Banco o referencia si existen
-          let refText = '';
-          if (p.bankAccount) {
-            refText = `${p.bankAccount.bankName} - ${p.bankAccount.accountNumber}`;
-          }
-          if (p.referenceNumber) {
-            refText = refText ? `${refText} | Ref: ${p.referenceNumber}` : `Ref: ${p.referenceNumber}`;
-          }
-          if (refText) {
-            pY += 11;
-            doc.fillColor(COLOR_PURPLE_TEXT).font('Helvetica').fontSize(7.5).text(refText, 47, pY, { width: 240, ellipsis: true });
-          }
-
-          pY += 14;
-        });
-      }
 
       // Derecha: Totales
       const hasDiscount = Number(sale.discountAmount || 0) > 0;
@@ -400,32 +383,32 @@ export class PdfService {
 
       const totalsBoxWidth = 207;
       const totalsBoxX = 577 - totalsBoxWidth; // 370
-      const totalsBoxHeight = 46 + extraLinesCount * 13.5;
+      const totalsBoxHeight = 82 + extraLinesCount * 18;
       doc.roundedRect(totalsBoxX, startBottomY, totalsBoxWidth, totalsBoxHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
 
-      let tY = startBottomY + 8;
+      let tY = startBottomY + 12;
       const labelX = totalsBoxX + 10;
       const valueX = totalsBoxX + 90;
       const valueWidth = totalsBoxWidth - 90 - 10;
 
       doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5).text('Subtotal:', labelX, tY);
       doc.fillColor(COLOR_TEXT_DARK).font('Helvetica').fontSize(8.5).text(`Q${Number(sale.subtotal).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
-      tY += 13.5;
+      tY += 18;
 
       if (hasDiscount) {
         doc.fillColor(COLOR_TEXT_MUTED).text('Descuento:', labelX, tY);
         doc.fillColor('#DC2626').text(`-Q${Number(sale.discountAmount).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
-        tY += 13.5;
+        tY += 18;
       }
 
       if (hasTax) {
         doc.fillColor(COLOR_TEXT_MUTED).text('Impuestos:', labelX, tY);
         doc.fillColor(COLOR_TEXT_DARK).text(`Q${Number(sale.taxAmount).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
-        tY += 13.5;
+        tY += 18;
       }
 
       doc.moveTo(totalsBoxX + 10, tY).lineTo(totalsBoxX + totalsBoxWidth - 10, tY).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
-      tY += 7;
+      tY += 10;
 
       doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(10.5).text('TOTAL:', labelX, tY);
       doc.text(`Q${Number(sale.total).toFixed(2)}`, valueX, tY, { width: valueWidth, align: 'right' });
@@ -441,6 +424,354 @@ export class PdfService {
         doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5).text('¡Gracias por su preferencia!', 35, 712, { align: 'center', width: 542 });
         doc.fontSize(8).text('Control Interno - No válido como Factura Tributaria', 35, 724, { align: 'center', width: 542 });
         doc.fontSize(7.5).text('Documento para validación y conciliación de cargos', 35, 742, { align: 'center', width: 542 });
+      }
+
+      doc.end();
+    });
+  }
+
+  async generatePaymentReceiptPdf(receipt: SalePaymentReceiptResponseDto): Promise<Buffer> {
+    const settings = await this.settingService.getSettings();
+
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 35, size: 'letter', bufferPages: true });
+      const buffers: Buffer[] = [];
+
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        resolve(pdfData);
+      });
+      doc.on('error', (err) => {
+        reject(err);
+      });
+
+      const COLOR_PRIMARY = '#0F172A';
+      const COLOR_TITLE = '#1E3A8A';
+      const COLOR_BLUE_BG = '#EFF6FF';
+      const COLOR_BLUE_BORDER = '#BFDBFE';
+      const COLOR_BLUE_TEXT = '#1E40AF';
+      const COLOR_CARD_BG = '#F8FAFC';
+      const COLOR_CARD_BORDER = '#E2E8F0';
+      const COLOR_TEXT_MUTED = '#64748B';
+      const COLOR_TEXT_DARK = '#334155';
+      const COLOR_BORDER = '#F1F5F9';
+      const COLOR_WHITE = '#FFFFFF';
+      const COLOR_PURPLE_BG = '#FAF5FF';
+      const COLOR_PURPLE_BORDER = '#F3E8FF';
+      const COLOR_GREEN = '#16A34A';
+      const COLOR_RED = '#DC2626';
+      const COLOR_ORANGE = '#EA580C';
+
+      const money = (value: number) => `Q${Number(value || 0).toFixed(2)}`;
+
+      let currentY = 20;
+
+      let logoPath = '';
+      const potentialLogoPaths = [
+        join(process.cwd(), 'src/common/pdf/logo.png'),
+        join(process.cwd(), 'dist/common/pdf/logo.png'),
+        join(__dirname, 'logo.png'),
+        join(process.cwd(), 'logo.png'),
+      ];
+
+      for (const p of potentialLogoPaths) {
+        if (existsSync(p)) {
+          logoPath = p;
+          break;
+        }
+      }
+
+      const drawHeader = (startY: number) => {
+        let y = startY;
+        const logoWidth = 70;
+        const companyX = 35 + logoWidth + 14;
+        const companyBoxWidth = 230;
+
+        const infoLines: string[] = [];
+        if (settings.address) infoLines.push(settings.address);
+        if (settings.phone) infoLines.push(`Tel: ${settings.phone}`);
+        if (settings.nit) infoLines.push(`NIT: ${settings.nit}`);
+
+        const fontSize = 8.5;
+        const lineHeight = 15.5;
+        const textBlockHeight = infoLines.length > 0 ? fontSize + (infoLines.length - 1) * lineHeight : 0;
+        let renderedLogoHeight = 50;
+
+        if (logoPath) {
+          try {
+            const logoImage = (doc as any).openImage(logoPath);
+            renderedLogoHeight = logoWidth * (logoImage.height / logoImage.width);
+
+            const textStartY = y + (renderedLogoHeight - textBlockHeight) / 2;
+
+            doc.image(logoImage, 35, y, { width: logoWidth });
+            doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(fontSize);
+
+            let lineY = textStartY;
+            infoLines.forEach((line) => {
+              doc.text(line, companyX, lineY, { width: companyBoxWidth, lineBreak: false, ellipsis: true });
+              lineY += lineHeight;
+            });
+          } catch (e) {
+            doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(14).text(settings.companyName || 'CABEN', 35, y);
+            doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(fontSize);
+            let lineY = y + 18;
+            infoLines.forEach((line) => {
+              doc.text(line, 35, lineY, { width: 280 });
+              lineY += lineHeight;
+            });
+          }
+        } else {
+          doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(14).text(settings.companyName || 'CABEN', 35, y);
+          doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(fontSize);
+          let lineY = y + 18;
+          infoLines.forEach((line) => {
+            doc.text(line, 35, lineY, { width: 280 });
+            lineY += lineHeight;
+          });
+        }
+
+        const titleFontSize = 16;
+        const badgeHeight = 18;
+        const rightGap = 5;
+        const rightBlockHeight = titleFontSize + rightGap + badgeHeight;
+        const rightStartY = y + (renderedLogoHeight - rightBlockHeight) / 2;
+
+        doc.fillColor(COLOR_TITLE).font('Helvetica-Bold').fontSize(titleFontSize).text('RECIBO DE ABONOS', 360, rightStartY, { align: 'right', width: 217 });
+
+        const badgeY = rightStartY + titleFontSize + rightGap;
+        const badgeWidth = 100;
+        const badgeX = 577 - badgeWidth;
+        const badgeFontSize = 8.5;
+        const badgeTextY = badgeY + (badgeHeight - badgeFontSize) / 2 + 1.2;
+        doc.roundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 4).fillAndStroke(COLOR_BLUE_BG, COLOR_BLUE_BORDER);
+        doc.fillColor(COLOR_BLUE_TEXT).font('Helvetica-Bold').fontSize(badgeFontSize).text(`Nº: ${receipt.invoiceNumber}`, badgeX, badgeTextY, { align: 'center', width: badgeWidth });
+
+        y = y + Math.max(renderedLogoHeight, 48) + 12;
+        doc.moveTo(35, y).lineTo(577, y).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
+        y += 18;
+
+        return y;
+      };
+
+      currentY = drawHeader(currentY);
+
+      const infoBoxY = currentY;
+      const customerName = (receipt.customer?.name || 'Consumidor Final').trim();
+      const rawNit = (receipt.customer?.nit || 'C/F').trim();
+      const customerNit = rawNit.toUpperCase() === 'CF' ? 'C/F' : rawNit;
+      const customerPhone = (receipt.customer?.phone || '').trim();
+      const customerAddress = (receipt.customer?.address || '').trim();
+
+      const dateObj = new Date(receipt.saleDate);
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const dateString = `${day}/${month}/${year} ${hours}:${minutes}`;
+
+      const statusMap: Record<string, string> = {
+        pending: 'Pendiente',
+        confirmed: 'Confirmado',
+        preparing: 'En preparación',
+        ready_for_pickup: 'Listo para recoger',
+        out_for_delivery: 'En camino',
+        delivered: 'Entregado',
+        partially_delivered: 'Entrega parcial',
+        cancelled: 'Cancelado',
+        on_hold: 'En espera',
+      };
+      const statusLabel = statusMap[receipt.saleStatus] || receipt.saleStatus;
+
+      doc.font('Helvetica').fontSize(8.5);
+      const colWidth = 235;
+      let leftColHeight = 24 + 13 + 13;
+      if (customerPhone) leftColHeight += 13;
+      if (customerAddress) {
+        leftColHeight += Math.max(13, doc.heightOfString(`Dirección: ${customerAddress}`, { width: colWidth }));
+      }
+
+      let rightColHeight = 24 + 13 + 13;
+      if (receipt.branch) {
+        rightColHeight += Math.max(13, doc.heightOfString(`Sucursal: ${receipt.branch.name}`, { width: colWidth }));
+      }
+      if (receipt.promisedDeliveryDate) {
+        rightColHeight += 13;
+      }
+
+      const dynamicBoxHeight = Math.max(85, Math.max(leftColHeight, rightColHeight) + 12);
+      doc.roundedRect(35, infoBoxY, 542, dynamicBoxHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
+
+      doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica-Bold').fontSize(8).text('INFORMACIÓN DEL CLIENTE', 48, infoBoxY + 10);
+
+      let clientY = infoBoxY + 24;
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLOR_TEXT_DARK).text('Nombre: ', 48, clientY, { continued: true });
+      doc.font('Helvetica').text(customerName);
+      clientY += 13;
+
+      doc.font('Helvetica-Bold').text('NIT: ', 48, clientY, { continued: true });
+      doc.font('Helvetica').text(customerNit);
+      clientY += 13;
+
+      if (customerPhone) {
+        doc.font('Helvetica-Bold').text('Teléfono: ', 48, clientY, { continued: true });
+        doc.font('Helvetica').text(customerPhone);
+        clientY += 13;
+      }
+
+      if (customerAddress) {
+        doc.font('Helvetica-Bold');
+        const addressLabelWidth = doc.widthOfString('Dirección: ');
+        doc.text('Dirección: ', 48, clientY);
+        doc.font('Helvetica').text(customerAddress, 48 + addressLabelWidth + 3.5, clientY, {
+          width: colWidth - addressLabelWidth - 3.5,
+          lineBreak: true,
+        });
+      }
+
+      doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica-Bold').fontSize(8).text('DETALLES DE LA EMISIÓN', 315, infoBoxY + 10);
+
+      let emissionY = infoBoxY + 24;
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLOR_TEXT_DARK).text('Fecha de Emisión: ', 315, emissionY, { continued: true });
+      doc.font('Helvetica').text(dateString);
+      emissionY += 13;
+
+      if (receipt.branch) {
+        doc.font('Helvetica-Bold');
+        const branchLabelWidth = doc.widthOfString('Sucursal: ');
+        doc.text('Sucursal: ', 315, emissionY);
+        doc.font('Helvetica').text(receipt.branch.name, 315 + branchLabelWidth + 3.5, emissionY, {
+          width: colWidth - branchLabelWidth - 3.5,
+          lineBreak: true,
+        });
+        emissionY = Math.max(emissionY + 13, doc.y + 2);
+      }
+
+      if (receipt.promisedDeliveryDate) {
+        const pDate = new Date(receipt.promisedDeliveryDate);
+        const promisedText = `${String(pDate.getDate()).padStart(2, '0')}/${String(pDate.getMonth() + 1).padStart(2, '0')}/${pDate.getFullYear()}`;
+        doc.font('Helvetica-Bold').text('Fecha de Entrega: ', 315, emissionY, { continued: true });
+        doc.font('Helvetica').text(promisedText);
+        emissionY += 13;
+      }
+
+      doc.font('Helvetica-Bold').text('Estado: ', 315, emissionY, { continued: true });
+      doc.font('Helvetica').text(statusLabel);
+
+      currentY = infoBoxY + dynamicBoxHeight + 15;
+
+      const drawTableHeader = (y: number) => {
+        doc.roundedRect(35, y, 542, 22, 3).fill(COLOR_PRIMARY);
+        doc.fillColor(COLOR_WHITE).font('Helvetica-Bold').fontSize(8);
+        doc.text('FECHA', 45, y + 6.5, { width: 80 });
+        doc.text('FORMA DE PAGO', 130, y + 6.5, { width: 130 });
+        doc.text('SALDO ANTERIOR', 265, y + 6.5, { width: 95, align: 'right' });
+        doc.text('ABONO', 365, y + 6.5, { width: 85, align: 'right' });
+        doc.text('SALDO RESTANTE', 455, y + 6.5, { width: 107, align: 'right' });
+      };
+
+      drawTableHeader(currentY);
+      currentY += 22;
+
+      const payments = (receipt.payments || []).filter((p) => p.status !== PaymentStatus.CANCELLED);
+
+      if (payments.length === 0) {
+        doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5);
+        doc.text('No hay abonos registrados', 45, currentY + 7.5, { width: 522, align: 'center' });
+        doc.moveTo(35, currentY + 24).lineTo(577, currentY + 24).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+        currentY += 24;
+      }
+
+      payments.forEach((payment) => {
+        if (currentY > 670) {
+          doc.addPage();
+          currentY = drawHeader(20);
+          drawTableHeader(currentY);
+          currentY += 22;
+        }
+
+        const payDate = new Date(payment.date);
+        const payDateText = `${String(payDate.getDate()).padStart(2, '0')}/${String(payDate.getMonth() + 1).padStart(2, '0')}/${payDate.getFullYear()}`;
+
+        doc.fillColor(COLOR_TEXT_DARK).font('Helvetica').fontSize(8.5);
+        doc.text(payDateText, 45, currentY + 7.5, { width: 80 });
+        doc.text(payment.paymentMethod?.name || 'Pago', 130, currentY + 7.5, { width: 130, ellipsis: true });
+        doc.text(money(payment.previousBalance), 265, currentY + 7.5, { width: 95, align: 'right' });
+        doc.fillColor(COLOR_GREEN).text(money(payment.amount), 365, currentY + 7.5, { width: 85, align: 'right' });
+        doc.fillColor(COLOR_TEXT_DARK).text(money(payment.remainingBalance), 455, currentY + 7.5, { width: 107, align: 'right' });
+
+        doc.moveTo(35, currentY + 24).lineTo(577, currentY + 24).strokeColor(COLOR_BORDER).lineWidth(0.5).stroke();
+        currentY += 24;
+      });
+
+      if (currentY > 560) {
+        doc.addPage();
+        currentY = drawHeader(20);
+      }
+
+      currentY += 15;
+      const startBottomY = currentY;
+      const isFullyPaid = !!receipt.financialSummary?.isFullyPaid;
+      const payBoxWidth = 260;
+      const payBoxHeight = 82;
+
+      doc.roundedRect(35, startBottomY, payBoxWidth, payBoxHeight, 6).fillAndStroke(COLOR_PURPLE_BG, COLOR_PURPLE_BORDER);
+
+      if (isFullyPaid) {
+        doc.fillColor(COLOR_GREEN).font('Helvetica-Bold').fontSize(9).text('Orden Liquidada', 47, startBottomY + 12);
+        doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8).text(
+          'Esta orden no mantiene saldo pendiente. Los abonos cubren el total de la venta.',
+          47,
+          startBottomY + 28,
+          { width: 236, lineGap: 2 },
+        );
+      } else {
+        doc.fillColor(COLOR_ORANGE).font('Helvetica-Bold').fontSize(9).text('Saldo Pendiente de Pago', 47, startBottomY + 12);
+        doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8).text(
+          'Esta orden mantiene un saldo pendiente conforme al historial de abonos.',
+          47,
+          startBottomY + 28,
+          { width: 236, lineGap: 2 },
+        );
+      }
+
+      const totalsBoxWidth = 207;
+      const totalsBoxX = 577 - totalsBoxWidth;
+      const totalsBoxHeight = 82;
+      doc.roundedRect(totalsBoxX, startBottomY, totalsBoxWidth, totalsBoxHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
+
+      let tY = startBottomY + 12;
+      const labelX = totalsBoxX + 10;
+      const valueX = totalsBoxX + 90;
+      const valueWidth = totalsBoxWidth - 90 - 10;
+      const totalSale = Number(receipt.financialSummary?.totalSale || 0);
+      const totalPaid = Number(receipt.financialSummary?.totalPaid || 0);
+      const currentPending = Number(receipt.financialSummary?.currentPending || 0);
+
+      doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5).text('Total de la Venta:', labelX, tY);
+      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica').fontSize(8.5).text(money(totalSale), valueX, tY, { width: valueWidth, align: 'right' });
+      tY += 18;
+
+      doc.fillColor(COLOR_TEXT_MUTED).text('Total Abonado:', labelX, tY);
+      doc.fillColor(COLOR_GREEN).text(`-${money(totalPaid)}`, valueX, tY, { width: valueWidth, align: 'right' });
+      tY += 18;
+
+      doc.moveTo(totalsBoxX + 10, tY).lineTo(totalsBoxX + totalsBoxWidth - 10, tY).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
+      tY += 10;
+
+      doc.fillColor(COLOR_PRIMARY).font('Helvetica-Bold').fontSize(10.5).text('Saldo Pendiente:', labelX, tY);
+      doc.fillColor(isFullyPaid ? COLOR_GREEN : COLOR_RED).text(money(currentPending), valueX, tY, { width: valueWidth, align: 'right' });
+
+      const range = doc.bufferedPageRange();
+      for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+
+        doc.moveTo(35, 700).lineTo(577, 700).strokeColor(COLOR_CARD_BORDER).lineWidth(1).stroke();
+        doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(8.5).text('¡Gracias por su preferencia!', 35, 712, { align: 'center', width: 542 });
+        doc.fontSize(8).text('Historial y Estado de Cuenta Consolidado de Abonos', 35, 724, { align: 'center', width: 542 });
+        doc.fontSize(7.5).text('Documento para validación y conciliación de abonos', 35, 742, { align: 'center', width: 542 });
       }
 
       doc.end();

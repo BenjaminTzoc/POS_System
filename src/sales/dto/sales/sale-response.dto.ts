@@ -25,7 +25,19 @@ export class SaleResponseDto extends BaseEntity {
   billingStartDate?: Date;
 
   @Expose()
+  promisedDeliveryDate?: Date | null;
+
+  @Expose()
+  isPreorder: boolean;
+
+  @Expose()
   deliveredAt?: Date;
+
+  @Expose()
+  deliveryOtp?: string;
+
+  @Expose()
+  deliveryOtpExpiresAt?: Date;
 
   @Expose()
   status: SaleStatus;

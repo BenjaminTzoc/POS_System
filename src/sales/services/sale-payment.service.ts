@@ -5,8 +5,9 @@ import { BankAccountService } from 'src/finances/services/bank-account.service';
 import { Repository, DataSource, IsNull } from 'typeorm';
 import { SalePayment, Sale, SaleStatus, PaymentStatus } from '../entities';
 import { SaleService } from '.';
-import { CreateSalePaymentDto, SalePaymentResponseDto, UpdateSalePaymentDto } from '../dto';
+import { CreateSalePaymentDto, SalePaymentResponseDto, UpdateSalePaymentDto, SalePaymentReceiptResponseDto, IndividualPaymentReceiptResponseDto, SaleCustomerReceiptDto, SaleBranchReceiptDto, SalePaymentReceiptItemDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
+import { PdfService } from 'src/common/pdf/pdf.service';
 
 @Injectable()
 export class SalePaymentService {
@@ -17,6 +18,7 @@ export class SalePaymentService {
     private readonly paymentMethodService: PaymentMethodService,
     private readonly bankAccountService: BankAccountService,
     private readonly dataSource: DataSource,
+    private readonly pdfService: PdfService,
   ) {}
 
   async create(dto: CreateSalePaymentDto): Promise<SalePaymentResponseDto> {
@@ -43,7 +45,7 @@ export class SalePaymentService {
       await this.bankAccountService.findOne(dto.bankAccountId);
     }
 
-    if (sale.status === SaleStatus.PENDING && !dto.isDownPayment) {
+    if (sale.status === SaleStatus.PENDING && !dto.isDownPayment && !sale.isPreorder) {
       try {
         const branchId = sale.branch?.id;
         if (!branchId) {
@@ -80,7 +82,7 @@ export class SalePaymentService {
         bankAccount: dto.bankAccountId ? { id: dto.bankAccountId } : null,
         manualBankAccount: dto.manualBankAccount,
         status: dto.status || PaymentStatus.COMPLETED,
-        isDownPayment: !!dto.isDownPayment,
+        isDownPayment: !!dto.isDownPayment || !!sale.isPreorder,
         notes: dto.notes,
       });
 
@@ -398,6 +400,7 @@ export class SalePaymentService {
           bankAccount: paymentData.bankAccountId ? { id: paymentData.bankAccountId } : null,
           manualBankAccount: paymentData.manualBankAccount,
           status: PaymentStatus.COMPLETED,
+          isDownPayment: !!sale.isPreorder,
         });
 
         const savedPayment = await queryRunner.manager.save(payment);
@@ -420,5 +423,138 @@ export class SalePaymentService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async getSaleReceipt(saleId: string): Promise<SalePaymentReceiptResponseDto> {
+    const saleRepo = this.dataSource.getRepository(Sale);
+    const sale = await saleRepo.findOne({
+      where: { id: saleId, deletedAt: IsNull() },
+      relations: [
+        'customer',
+        'branch',
+        'payments',
+        'payments.paymentMethod',
+        'payments.bankAccount',
+      ],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${saleId} no encontrada`);
+    }
+
+    // Ordenar los pagos cronológicamente
+    const payments = (sale.payments || [])
+      .filter((p) => !p.deletedAt)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    let runningBalance = Number(sale.total);
+    let totalPaid = 0;
+
+    const paymentItems: SalePaymentReceiptItemDto[] = payments.map((payment) => {
+      const amount = Number(payment.amount);
+      const previousBalance = runningBalance;
+
+      let remainingBalance = previousBalance;
+      if (payment.status === PaymentStatus.COMPLETED) {
+        runningBalance = Math.max(0, runningBalance - amount);
+        remainingBalance = runningBalance;
+        totalPaid += amount;
+      }
+
+      return {
+        id: payment.id,
+        date: payment.date,
+        amount,
+        previousBalance,
+        remainingBalance,
+        isDownPayment: payment.isDownPayment,
+        paymentMethod: {
+          id: payment.paymentMethod?.id,
+          name: payment.paymentMethod?.name || 'Otro',
+          code: payment.paymentMethod?.code,
+        },
+        referenceNumber: payment.referenceNumber,
+        bankAccount: payment.bankAccount
+          ? {
+              id: payment.bankAccount.id,
+              bankName: payment.bankAccount.bankName,
+              accountNumber: payment.bankAccount.accountNumber,
+            }
+          : null,
+        manualBankAccount: payment.manualBankAccount,
+        notes: payment.notes,
+        status: payment.status,
+        createdAt: payment.createdAt,
+      };
+    });
+
+    const totalSale = Number(sale.total);
+    const currentPending = Number(sale.pendingAmount !== undefined ? sale.pendingAmount : Math.max(0, totalSale - totalPaid));
+    const isFullyPaid = currentPending <= 0;
+
+    const customerData: SaleCustomerReceiptDto = {
+      id: sale.customer?.id || null,
+      name: sale.customer?.name || sale.guestCustomer?.name || 'Consumidor Final',
+      nit: sale.customer?.nit || sale.guestCustomer?.nit || 'C/F',
+      phone: sale.customer?.phone || sale.guestCustomer?.phone || null,
+      email: sale.customer?.email || sale.guestCustomer?.email || null,
+      address: sale.customer?.address || sale.guestCustomer?.address || null,
+    };
+
+    const branchData: SaleBranchReceiptDto | null = sale.branch
+      ? {
+          id: sale.branch.id,
+          name: sale.branch.name,
+          address: sale.branch.address,
+          phone: sale.branch.phone,
+        }
+      : null;
+
+    const response: SalePaymentReceiptResponseDto = {
+      saleId: sale.id,
+      invoiceNumber: sale.invoiceNumber,
+      saleDate: sale.date || sale.createdAt,
+      promisedDeliveryDate: sale.promisedDeliveryDate || null,
+      isPreorder: !!sale.isPreorder,
+      saleStatus: sale.status,
+      customer: customerData,
+      branch: branchData,
+      financialSummary: {
+        totalSale,
+        totalPaid: Number(sale.paidAmount !== undefined ? sale.paidAmount : totalPaid),
+        currentPending,
+        isFullyPaid,
+      },
+      payments: paymentItems,
+    };
+
+    return plainToInstance(SalePaymentReceiptResponseDto, response, { excludeExtraneousValues: true });
+  }
+
+  async getPaymentReceipt(paymentId: string): Promise<IndividualPaymentReceiptResponseDto> {
+    const payment = await this.paymentRepository.findOne({
+      where: { id: paymentId, deletedAt: IsNull() },
+      relations: ['sale'],
+    });
+
+    if (!payment || !payment.sale) {
+      throw new NotFoundException(`Pago con ID ${paymentId} no encontrado`);
+    }
+
+    const fullReceipt = await this.getSaleReceipt(payment.sale.id);
+    const specificPayment = fullReceipt.payments.find((p) => p.id === paymentId) || null;
+
+    const result: IndividualPaymentReceiptResponseDto = {
+      ...fullReceipt,
+      currentPayment: specificPayment,
+    };
+
+    return plainToInstance(IndividualPaymentReceiptResponseDto, result, { excludeExtraneousValues: true });
+  }
+
+  async generateReceiptPdf(saleId: string): Promise<{ buffer: Buffer; invoiceNumber: string }> {
+    const receipt = await this.getSaleReceipt(saleId);
+    const buffer = await this.pdfService.generatePaymentReceiptPdf(receipt);
+    return { buffer, invoiceNumber: receipt.invoiceNumber };
   }
 }

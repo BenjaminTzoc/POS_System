@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { InventoryTransferService } from '../services/inventory-transfer.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { User as UserDecorator } from 'src/common/decorators/user.decorator';
-import { CreateInventoryTransferDto, InventoryTransferResponseDto, InventoryTransferListResponseDto, UpdateTransferStatusDto } from '../dto';
+import { CreateInventoryTransferDto, UpdateInventoryTransferDto, InventoryTransferResponseDto, InventoryTransferListResponseDto, UpdateTransferStatusDto } from '../dto';
 
 @Controller('inventory-transfers')
 @UseGuards(JwtAuthGuard)
@@ -28,6 +28,15 @@ export class InventoryTransferController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryTransferResponseDto> {
     return this.transferService.findOne(id);
+  }
+
+  @Put(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateInventoryTransferDto,
+    @UserDecorator() user: any,
+  ): Promise<InventoryTransferResponseDto> {
+    return this.transferService.update(id, dto, user.id);
   }
 
   @Patch(':id/status')

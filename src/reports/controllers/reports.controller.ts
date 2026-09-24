@@ -3,6 +3,10 @@ import { ReportsService } from '../services/reports.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { User } from '../../common/decorators/user.decorator';
 import { isSuperAdmin } from '../../common/utils/user-scope.util';
+import { CustomerWeeklySummaryQueryDto } from '../dto/customer-weekly-summary.dto';
+import { TodayPulseQueryDto } from '../dto/today-pulse.dto';
+import { DashboardCalendarQueryDto } from '../dto/dashboard-calendar.dto';
+import { TodayPaymentsQueryDto } from '../dto/today-payments.dto';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard)
@@ -92,13 +96,22 @@ export class ReportsController {
     return this.reportsService.getWasteByProduct(branchId, numLimit, sDate, eDate);
   }
 
+  @Get('dashboard/today-pulse')
+  async getTodayPulse(@User() user: any, @Query() query: TodayPulseQueryDto) {
+    const branchId = isSuperAdmin(user) ? query.branchId : user.branch?.id;
+    return this.reportsService.getTodayPulse(branchId, query.lowStockLimit ?? 3);
+  }
+
+  @Get('dashboard/today-payments')
+  async getTodayPayments(@User() user: any, @Query() query: TodayPaymentsQueryDto) {
+    const branchId = isSuperAdmin(user) ? query.branchId : user.branch?.id;
+    return this.reportsService.getTodayPayments(branchId, query.limit ?? 50);
+  }
+
   @Get('dashboard/calendar')
-  async getDashboardCalendar(@User() user: any, @Query('month') month: string, @Query('year') year: string, @Query('branchId') branchIdQuery?: string): Promise<any> {
-    const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
-    const now = new Date();
-    const m = month ? parseInt(month, 10) : now.getMonth() + 1;
-    const y = year ? parseInt(year, 10) : now.getFullYear();
-    return this.reportsService.getDashboardCalendar(m, y, branchId);
+  async getDashboardCalendar(@User() user: any, @Query() query: DashboardCalendarQueryDto) {
+    const branchId = isSuperAdmin(user) ? query.branchId : user.branch?.id;
+    return this.reportsService.getDashboardCalendar(query.month, query.year, branchId);
   }
 
   @Get('branches/weekly-consolidation')
@@ -120,6 +133,12 @@ export class ReportsController {
   async getWeeklyCustomerConsolidated(@User() user: any, @Query('weekStartDate') weekStartDate: string, @Query('branchId') branchIdQuery?: string): Promise<any> {
     const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
     return this.reportsService.getWeeklyCustomerConsolidated(weekStartDate, branchId);
+  }
+
+  @Get('customers/weekly-summary')
+  async getWeeklyCustomerSummary(@User() user: any, @Query() query: CustomerWeeklySummaryQueryDto) {
+    const branchId = isSuperAdmin(user) ? query.branchId : user.branch?.id;
+    return this.reportsService.getWeeklyCustomerSummary(query.weekStartDate, branchId, query.limit ?? 50);
   }
 
   @Get('products/monthly-trends')

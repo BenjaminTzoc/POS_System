@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { InventoryMovementService } from '../services';
-import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto, CancelMovementDto } from '../dto';
+import { CreateInventoryMovementDto, InventoryMovementResponseDto, UpdateInventoryMovementDto, CancelMovementDto, QueryInventoryMovementDto, PaginatedInventoryMovementResponseDto } from '../dto';
 import { MovementType } from '../entities/inventory-movement.entity';
 import { Public } from 'src/auth/decorators';
 
@@ -43,8 +43,8 @@ export class InventoryMovementController {
 
   @Get()
   @Public()
-  findAll(): Promise<InventoryMovementResponseDto[]> {
-    return this.movementService.findAll();
+  findAll(@Query() query: QueryInventoryMovementDto): Promise<PaginatedInventoryMovementResponseDto> {
+    return this.movementService.findAll(query);
   }
 
   @Get('product/:productId')
