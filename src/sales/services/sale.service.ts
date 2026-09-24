@@ -331,7 +331,7 @@ export class SaleService {
 
       return finalSale;
     } catch (error) {
-      await qr.rollbackTransaction();
+      if (qr.isTransactionActive) await qr.rollbackTransaction();
       throw error;
     } finally {
       await qr.release();
@@ -609,7 +609,7 @@ export class SaleService {
 
       return finalSale;
     } catch (error) {
-      await qr.rollbackTransaction();
+      if (qr.isTransactionActive) await qr.rollbackTransaction();
       throw error;
     } finally {
       await qr.release();
@@ -750,7 +750,6 @@ export class SaleService {
         'payments.bankAccount',
         'discounts',
       ],
-      relationLoadStrategy: 'query',
       order: {
         payments: {
           createdAt: 'DESC',
@@ -830,7 +829,6 @@ export class SaleService {
     const sale = await this.saleRepository.findOne({
       where: { id, deletedAt: IsNull() },
       relations: ['details', 'details.product', 'customer', 'branch'],
-      relationLoadStrategy: 'query',
     });
 
     if (!sale) {
@@ -936,7 +934,7 @@ export class SaleService {
       await queryRunner.commitTransaction();
       return this.findOne(id);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
       throw error;
     } finally {
       await queryRunner.release();
@@ -1042,7 +1040,7 @@ export class SaleService {
       await queryRunner.commitTransaction();
       return this.findOne(id);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
       throw error;
     } finally {
       await queryRunner.release();
@@ -1382,7 +1380,7 @@ export class SaleService {
 
       return this.findOne(id);
     } catch (error) {
-      await qr.rollbackTransaction();
+      if (qr.isTransactionActive) await qr.rollbackTransaction();
       throw error;
     } finally {
       await qr.release();
