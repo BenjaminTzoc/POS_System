@@ -25,24 +25,30 @@ import { SettingsModule } from './settings/settings.module';
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get('DB_HOST', 'localhost'),
-        port: configService.get('DB_PORT', 5432),
-        username: configService.get('DB_USERNAME', 'postgres'),
-        password: configService.get('DB_PASSWORD', 'admin123'),
-        database: configService.get('DB_NAME', 'sistema-inventario'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        autoLoadEntities: true,
-        synchronize: true,
-        logging: configService.get('DB_LOGGING') === 'true' ? true : ['error'],
-        ssl: configService.get('DB_SSL') === 'true',
-        extra: configService.get('DB_SSL') === 'true' ? {
-          ssl: {
-            rejectUnauthorized: false,
+      useFactory: (configService: ConfigService) => {
+        const poolSize = Math.max(1, Number(configService.get('DB_POOL_SIZE', 5)) || 5);
+        const useSsl = configService.get('DB_SSL') === 'true';
+        return {
+          type: 'postgres' as const,
+          host: configService.get('DB_HOST', 'localhost'),
+          port: configService.get('DB_PORT', 5432),
+          username: configService.get('DB_USERNAME', 'postgres'),
+          password: configService.get('DB_PASSWORD', 'admin123'),
+          database: configService.get('DB_NAME', 'sistema-inventario'),
+          entities: [__dirname + '/**/*.entity{.ts,.js}'],
+          autoLoadEntities: true,
+          synchronize: true,
+          logging: configService.get('DB_LOGGING') === 'true' ? true : ['error'],
+          ssl: useSsl,
+          poolSize,
+          extra: {
+            max: poolSize,
+            idleTimeoutMillis: 10_000,
+            connectionTimeoutMillis: 5_000,
+            ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
           },
-        } : {},
-      }),
+        };
+      },
       inject: [ConfigService],
     }),
     AuthModule,
