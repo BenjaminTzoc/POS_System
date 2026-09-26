@@ -26,7 +26,7 @@ import { SettingsModule } from './settings/settings.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
-        const poolSize = Math.max(1, Number(configService.get('DB_POOL_SIZE', 5)) || 5);
+        const poolSize = Math.max(1, Number(configService.get('DB_POOL_SIZE', 3)) || 3);
         const useSsl = configService.get('DB_SSL') === 'true';
         return {
           type: 'postgres' as const,
@@ -43,8 +43,9 @@ import { SettingsModule } from './settings/settings.module';
           poolSize,
           extra: {
             max: poolSize,
-            idleTimeoutMillis: 10_000,
+            idleTimeoutMillis: 5_000,
             connectionTimeoutMillis: 5_000,
+            allowExitOnIdle: true,
             ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
           },
         };
