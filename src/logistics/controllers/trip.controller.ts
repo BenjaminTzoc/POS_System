@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { TripService } from '../services/trip.service';
 import {
   AddTripItemsDto,
@@ -119,12 +121,27 @@ export class TripController {
   }
 
   @Post(':id/incidents')
+  @UseInterceptors(
+    FilesInterceptor('attachments', 5, {
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const mime = (file.mimetype || '').toLowerCase();
+        if (!mime || mime === 'application/octet-stream' || mime.startsWith('image/')) {
+          cb(null, true);
+          return;
+        }
+        cb(new BadRequestException('Solo se permiten archivos de imagen'), false);
+      },
+    }),
+  )
   createIncident(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateTripIncidentDto,
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
     @User() user: any,
   ): Promise<TripResponseDto> {
-    return this.tripService.createIncident(id, dto, user);
+    return this.tripService.createIncident(id, dto, user, files);
   }
 
   @Patch(':id/incidents/:incidentId/resolve')

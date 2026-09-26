@@ -1,5 +1,5 @@
-import { IsNotEmpty, IsOptional, IsUUID, IsEnum, IsDateString, IsArray, ValidateNested, IsNumber, Min, IsString, Matches, ValidateIf } from 'class-validator';
-import { Type, Expose } from 'class-transformer';
+import { IsNotEmpty, IsOptional, IsUUID, IsEnum, IsDateString, IsArray, ValidateNested, IsNumber, Min, IsString, Matches, ValidateIf, IsBoolean } from 'class-validator';
+import { Type, Expose, Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { TripStatus } from '../entities/trip.entity';
@@ -121,6 +121,7 @@ export class CreateTripIncidentDto {
   description: string;
 
   @IsOptional()
+  @ValidateIf((_, value) => !!value)
   @IsUUID()
   tripItemId?: string;
 }
@@ -134,12 +135,27 @@ export class ReceiveTripReturnItemDto {
   @IsNumber()
   @Min(0)
   receivedQuantity: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  registerAsWaste?: boolean;
+}
+
+export enum ReturnDiscrepancyReason {
+  LOAD_ERROR = 'load_error',
+  ROAD_WASTE = 'road_waste',
+  UNKNOWN = 'unknown',
 }
 
 export class ReceiveTripReturnDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsEnum(ReturnDiscrepancyReason)
+  discrepancyReason?: ReturnDiscrepancyReason;
 
   @IsOptional()
   @IsArray()
@@ -191,6 +207,12 @@ export class TripReturnResponseDto extends BaseEntity {
   receivedBy?: UserSummaryDto | null;
 
   @Expose()
+  tripItemId?: string | null;
+
+  @Expose()
+  sale?: { id: string; invoiceNumber?: string; orderNumber?: string } | null;
+
+  @Expose()
   @Type(() => TripReturnItemResponseDto)
   items: TripReturnItemResponseDto[];
 }
@@ -211,6 +233,12 @@ export class TripIncidentResponseDto extends BaseEntity {
   @Expose()
   @Type(() => UserSummaryDto)
   resolvedBy?: UserSummaryDto | null;
+
+  @Expose()
+  attachmentUrls?: string[] | null;
+
+  @Expose()
+  tripItemId?: string | null;
 }
 
 export class TripItemResponseDto extends BaseEntity {

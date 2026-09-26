@@ -25,6 +25,9 @@ export class TripIncident extends BaseEntity {
   @Column({ type: 'enum', enum: TripIncidentStatus, default: TripIncidentStatus.OPEN })
   status: TripIncidentStatus;
 
+  @Column({ name: 'attachment_urls', type: 'simple-json', nullable: true })
+  attachmentUrls?: string[] | null;
+
   @Column({ name: 'resolution_notes', type: 'text', nullable: true })
   resolutionNotes?: string | null;
 

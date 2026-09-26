@@ -168,7 +168,7 @@ export const MENU_ITEMS: MenuItem[] = [
         permission: '',
       },
       {
-        label: 'Planificación de Viajes',
+        label: 'Viajes',
         icon: 'pi pi-map',
         route: '/logistics/trips',
         permission: '',

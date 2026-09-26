@@ -11,9 +11,10 @@ import { Sale, SaleStatus } from 'src/sales/entities/sale.entity';
 import { TripReturn, TripReturnStatus } from '../entities/trip-return.entity';
 import { TripReturnItem } from '../entities/trip-return-item.entity';
 import { TripIncident, TripIncidentStatus } from '../entities/trip-incident.entity';
-import { AddTripItemsDto, CreateTripDto, CreateTripIncidentDto, DeliverSaleItemDto, DeliveryOutcome, ReceiveTripReturnDto, ResolveTripIncidentDto, TripResponseDto, UpdateTripDto } from '../dto/trip.dto';
+import { AddTripItemsDto, CreateTripDto, CreateTripIncidentDto, DeliverSaleItemDto, DeliveryOutcome, ReceiveTripReturnDto, ResolveTripIncidentDto, ReturnDiscrepancyReason, TripResponseDto, UpdateTripDto } from '../dto/trip.dto';
 import { ReceiveTransferDto } from '../dto/inventory-transfer.dto';
 import { InventoryMovementService } from './inventory-movement.service';
+import { FilesService } from './files.service';
 import { MovementConcept, MovementStatus, MovementType } from '../entities/inventory-movement.entity';
 import { Inventory } from '../entities/inventory.entity';
 import { isSuperAdmin } from 'src/common/utils/user-scope.util';
@@ -43,6 +44,7 @@ export class TripService {
     @InjectRepository(TripIncident)
     private readonly tripIncidentRepository: Repository<TripIncident>,
     private readonly movementService: InventoryMovementService,
+    private readonly filesService: FilesService,
     private readonly dataSource: DataSource,
     private readonly tripGateway: TripGateway,
   ) {}
@@ -150,6 +152,7 @@ export class TripService {
     return {
       id: sale.id,
       invoiceNumber: sale.invoiceNumber,
+      orderNumber: sale.invoiceNumber,
       status: sale.status,
       total: sale.total,
       pendingAmount: sale.pendingAmount,
@@ -227,6 +230,14 @@ export class TripService {
         receptionNotes: tripReturn.receptionNotes ?? null,
         receivedAt: tripReturn.receivedAt ?? null,
         receivedBy: this.userSummary(tripReturn.receivedBy as any),
+        tripItemId: tripReturn.tripItem?.id ?? null,
+        sale: tripReturn.sale
+          ? {
+              id: tripReturn.sale.id,
+              invoiceNumber: tripReturn.sale.invoiceNumber,
+              orderNumber: tripReturn.sale.invoiceNumber,
+            }
+          : null,
         items: (tripReturn.items || []).map((returnItem) => ({
           id: returnItem.id,
           returnedQuantity: Number(returnItem.returnedQuantity),
@@ -241,6 +252,8 @@ export class TripService {
         resolutionNotes: incident.resolutionNotes ?? null,
         resolvedAt: incident.resolvedAt ?? null,
         resolvedBy: this.userSummary(incident.resolvedBy as any),
+        attachmentUrls: incident.attachmentUrls ?? [],
+        tripItemId: incident.tripItem?.id ?? null,
       })),
     } as TripResponseDto;
   }
@@ -1007,7 +1020,10 @@ export class TripService {
     'returns.items.product',
     'returns.items.product.unit',
     'returns.receivedBy',
+    'returns.tripItem',
+    'returns.sale',
     'incidents',
+    'incidents.tripItem',
     'incidents.resolvedBy',
   ];
 
@@ -1103,14 +1119,14 @@ export class TripService {
 
     try {
       const discrepancies: string[] = [];
+      const wasteLines: string[] = [];
+      const unresolvedLines: string[] = [];
 
       for (const item of tripReturn.items) {
         const expectedQty = Number(item.returnedQuantity);
         let receivedQty = expectedQty;
-        if (dto.items && dto.items.length > 0) {
-          const match = dto.items.find((i) => i.productId === item.product.id);
-          if (match) receivedQty = Number(match.receivedQuantity);
-        }
+        const match = dto.items?.find((i) => i.productId === item.product.id);
+        if (match) receivedQty = Number(match.receivedQuantity);
 
         if (receivedQty > expectedQty) {
           throw new BadRequestException(
@@ -1118,16 +1134,51 @@ export class TripService {
           );
         }
 
-        if (receivedQty < expectedQty) {
-          discrepancies.push(
-            `${item.product.name}: Esperado ${expectedQty}, recibido ${receivedQty} (faltante: ${expectedQty - receivedQty})`,
-          );
+        const missingQty = expectedQty - receivedQty;
+        const registerAsWaste = missingQty > 0 && !!match?.registerAsWaste;
+        if (missingQty > 0) {
+          const line = `${item.product.name}: Esperado ${expectedQty}, recibido ${receivedQty} (faltante: ${missingQty})`;
+          discrepancies.push(registerAsWaste ? `${line} [merma kárdex]` : line);
+          if (registerAsWaste) wasteLines.push(line);
+          else unresolvedLines.push(line);
         }
 
         item.receivedQuantity = receivedQty;
         await qr.manager.save(item);
 
         if (item.product?.manageStock) {
+          if (registerAsWaste) {
+            const inventory = await qr.manager.findOne(Inventory, {
+              where: {
+                product: { id: item.product.id },
+                branch: { id: saleBranchId },
+                deletedAt: IsNull(),
+              },
+            });
+            const available = Number(inventory?.stock ?? 0);
+            const wasteQty = Math.min(missingQty, available);
+            if (wasteQty > 0) {
+              await this.movementService.create(
+                {
+                  productId: item.product.id,
+                  branchId: saleBranchId,
+                  quantity: wasteQty,
+                  type: MovementType.OUT,
+                  notes: `Merma en recepción de retorno (Viaje ${trip.tripNumber}, orden ${tripReturn.sale?.invoiceNumber || 'N/A'})`,
+                  unitCost: item.product.cost,
+                  totalCost: wasteQty * Number(item.product.cost || 0),
+                  status: MovementStatus.COMPLETED,
+                  referenceId: tripReturn.sale?.id,
+                  referenceNumber: tripReturn.sale?.invoiceNumber,
+                  concept: MovementConcept.WASTE,
+                },
+                user?.id,
+                true,
+                qr.manager,
+              );
+            }
+          }
+
           await qr.manager.decrement(
             Inventory,
             {
@@ -1152,13 +1203,58 @@ export class TripService {
 
       if (discrepancies.length) {
         const invoice = tripReturn.sale?.invoiceNumber || 'sin factura';
-        const incident = qr.manager.create(TripIncident, {
-          trip: { id: tripId } as Trip,
-          tripItem: tripReturn.tripItem?.id ? ({ id: tripReturn.tripItem.id } as TripItem) : null,
-          description: `Faltante al recibir devolución de orden ${invoice}: ${discrepancies.join('; ')}`,
-          status: TripIncidentStatus.OPEN,
-        });
-        await qr.manager.save(incident);
+        const reasonLabel =
+          dto.discrepancyReason === ReturnDiscrepancyReason.LOAD_ERROR
+            ? 'error de carga'
+            : dto.discrepancyReason === ReturnDiscrepancyReason.ROAD_WASTE
+              ? 'merma en ruta'
+              : dto.discrepancyReason === ReturnDiscrepancyReason.UNKNOWN
+                ? 'causa desconocida'
+                : null;
+        const reasonSuffix = reasonLabel ? ` [causa: ${reasonLabel}]` : '';
+        const allWaste = unresolvedLines.length === 0 && wasteLines.length > 0;
+        const countNote = `Conteo en planta (orden ${invoice}): ${discrepancies.join('; ')}${reasonSuffix}`;
+        const stopId = tripReturn.tripItem?.id;
+        const openOnStop = stopId
+          ? await qr.manager.find(TripIncident, {
+              where: {
+                trip: { id: tripId },
+                tripItem: { id: stopId },
+                status: TripIncidentStatus.OPEN,
+                deletedAt: IsNull(),
+              },
+            })
+          : [];
+
+        if (openOnStop.length) {
+          for (const existing of openOnStop) {
+            existing.description = `${existing.description}\n${countNote}`;
+            if (allWaste) {
+              existing.status = TripIncidentStatus.RESOLVED;
+              existing.resolutionNotes =
+                dto.notes?.trim() ||
+                `Faltante registrado como merma en kárdex. Aviso del piloto cerrado con el conteo de planta.`;
+              existing.resolvedAt = new Date();
+              existing.resolvedBy = user?.id ? ({ id: user.id } as any) : null;
+            }
+            await qr.manager.save(existing);
+          }
+        } else {
+          const incident = qr.manager.create(TripIncident, {
+            trip: { id: tripId } as Trip,
+            tripItem: stopId ? ({ id: stopId } as TripItem) : null,
+            description: `Faltante al recibir devolución de orden ${invoice}: ${discrepancies.join('; ')}${reasonSuffix}`,
+            status: allWaste ? TripIncidentStatus.RESOLVED : TripIncidentStatus.OPEN,
+          });
+          if (allWaste) {
+            incident.resolutionNotes =
+              dto.notes?.trim() ||
+              `Faltante registrado como merma en kárdex: ${wasteLines.join('; ')}`;
+            incident.resolvedAt = new Date();
+            incident.resolvedBy = user?.id ? ({ id: user.id } as any) : null;
+          }
+          await qr.manager.save(incident);
+        }
       }
 
       await qr.commitTransaction();
@@ -1171,22 +1267,44 @@ export class TripService {
     }
   }
 
-  async createIncident(tripId: string, dto: CreateTripIncidentDto, user?: any): Promise<TripResponseDto> {
+  async createIncident(
+    tripId: string,
+    dto: CreateTripIncidentDto,
+    user?: any,
+    files?: Express.Multer.File[],
+  ): Promise<TripResponseDto> {
     const trip = await this.getTripForAccess(tripId);
     this.assertDriverOrPlant(trip, user);
 
-    if (dto.tripItemId) {
+    const tripItemId = dto.tripItemId?.trim() || undefined;
+    if (tripItemId) {
       const item = await this.tripItemRepository.findOne({
-        where: { id: dto.tripItemId, trip: { id: tripId } },
+        where: { id: tripItemId, trip: { id: tripId } },
       });
-      if (!item) throw new NotFoundException(`Operación con ID ${dto.tripItemId} no encontrada en este viaje`);
+      if (!item) throw new NotFoundException(`Operación con ID ${tripItemId} no encontrada en este viaje`);
+    }
+
+    const attachments = (files || []).filter(Boolean);
+    if (attachments.length > 5) {
+      throw new BadRequestException('Puede adjuntar hasta 5 imágenes');
+    }
+
+    const attachmentUrls: string[] = [];
+    try {
+      for (const file of attachments) {
+        attachmentUrls.push(await this.filesService.saveTripIncidentImage(file));
+      }
+    } catch (error) {
+      await Promise.all(attachmentUrls.map((url) => this.filesService.deleteImage(url)));
+      throw error;
     }
 
     const incident = this.tripIncidentRepository.create({
       trip: { id: tripId } as Trip,
-      tripItem: dto.tripItemId ? ({ id: dto.tripItemId } as TripItem) : null,
+      tripItem: tripItemId ? ({ id: tripItemId } as TripItem) : null,
       description: dto.description,
       status: TripIncidentStatus.OPEN,
+      attachmentUrls,
     });
     await this.tripIncidentRepository.save(incident);
     return this.findOne(tripId);

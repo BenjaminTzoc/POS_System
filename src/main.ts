@@ -36,12 +36,27 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
 
   app.enableCors({
-    origin: [
-      'https://pos-systemfront.seenode.app',
-      'http://localhost:4200',
-      'http://localhost:3000',
-      'http://192.168.0.2:4200',
-    ],
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      const allowed = new Set([
+        'https://pos-systemfront.seenode.app',
+        'http://localhost:4200',
+        'http://localhost:3000',
+        'http://127.0.0.1:4200',
+      ]);
+      const isLanDev =
+        /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):(4200|3000)$/.test(
+          origin,
+        );
+      if (allowed.has(origin) || isLanDev) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`CORS blocked for origin ${origin}`));
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type,Accept,Authorization',
     credentials: true,

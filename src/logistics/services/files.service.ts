@@ -28,22 +28,33 @@ export class FilesService {
   }
 
   async saveProductImage(file: Express.Multer.File): Promise<string> {
+    return this.saveImage(file, 'caben-products', 800);
+  }
+
+  async saveTripIncidentImage(file: Express.Multer.File): Promise<string> {
+    return this.saveImage(file, 'caben-trip-incidents', 1600);
+  }
+
+  async saveImage(file: Express.Multer.File, folder: string, maxSize = 800): Promise<string> {
+    if (!file.mimetype || file.mimetype === 'application/octet-stream') {
+      file.mimetype = 'image/jpeg';
+    }
     if (!file.mimetype.startsWith('image/')) {
       throw new BadRequestException('Solo se permiten archivos de imagen');
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      throw new BadRequestException('La imagen no puede ser mayor a 5MB');
+    if (file.size > 15 * 1024 * 1024) {
+      throw new BadRequestException('La imagen no puede ser mayor a 15MB');
     }
 
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
-          folder: 'caben-products',
+          folder,
           resource_type: 'image',
           transformation: [
-            { width: 800, height: 800, crop: 'limit' }, // Redimensiona si es gigante (ej: foto de celular de 4000px), sin deformar
-            { quality: 'auto', fetch_format: 'auto' },   // Convierte automáticamente a WebP/AVIF y comprime sin pérdida perceptible
+            { width: maxSize, height: maxSize, crop: 'limit' },
+            { quality: 'auto', fetch_format: 'auto' },
           ],
         },
         (error, result: UploadApiResponse) => {
@@ -55,7 +66,6 @@ export class FilesService {
         },
       );
 
-      // Convertir el buffer de multer a stream para Cloudinary
       const readableStream = new Readable();
       readableStream.push(file.buffer);
       readableStream.push(null);
@@ -64,21 +74,22 @@ export class FilesService {
   }
 
   async deleteProductImage(imageUrl: string): Promise<void> {
+    return this.deleteImage(imageUrl);
+  }
+
+  async deleteImage(imageUrl: string): Promise<void> {
     if (!imageUrl) return;
 
     try {
-      // Si es una URL de Cloudinary, extraer el public_id
-      if (imageUrl.includes('res.cloudinary.com')) {
-        // Ejemplo URL: https://res.cloudinary.com/demo/image/upload/v12345/caben-products/xyz.jpg
-        const parts = imageUrl.split('/');
-        const folderIndex = parts.indexOf('caben-products');
-        if (folderIndex !== -1) {
-          const publicIdWithExt = parts.slice(folderIndex).join('/');
-          const publicId = publicIdWithExt.replace(/\.[^/.]+$/, ''); // quitar extensión
-          await cloudinary.uploader.destroy(publicId);
-          this.logger.log(`Imagen eliminada de Cloudinary: ${publicId}`);
-        }
-      }
+      if (!imageUrl.includes('res.cloudinary.com')) return;
+      const uploadIndex = imageUrl.indexOf('/upload/');
+      if (uploadIndex === -1) return;
+      const afterUpload = imageUrl.slice(uploadIndex + '/upload/'.length);
+      const withoutVersion = afterUpload.replace(/^v\d+\//, '');
+      const publicId = withoutVersion.replace(/\.[^/.]+$/, '').split('?')[0];
+      if (!publicId) return;
+      await cloudinary.uploader.destroy(publicId);
+      this.logger.log(`Imagen eliminada de Cloudinary: ${publicId}`);
     } catch (error) {
       this.logger.warn(`No se pudo eliminar la imagen previa en Cloudinary: ${error.message}`);
     }
