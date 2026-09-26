@@ -23,6 +23,7 @@ import { MailService } from 'src/common/mail/mail.service';
 import { InventoryMovementService } from 'src/logistics/services';
 import { CustomerService } from './customer.service';
 import { DiscountCodeService } from './discount-code.service';
+import { CustomerProductPriceService } from './customer-product-price.service';
 
 @Injectable()
 export class QuotationService {
@@ -43,6 +44,7 @@ export class QuotationService {
     private readonly inventoryMovementService: InventoryMovementService,
     private readonly customerService: CustomerService,
     private readonly discountCodeService: DiscountCodeService,
+    private readonly customerProductPriceService: CustomerProductPriceService,
   ) {}
 
   async create(dto: CreateQuotationDto, userId: string): Promise<QuotationResponseDto> {
@@ -79,6 +81,10 @@ export class QuotationService {
 
       const savedQuotation = await queryRunner.manager.save(quotation);
 
+      const customPrices = await this.customerProductPriceService.getActivePriceMap(
+        dto.customerId,
+        dto.items.map((i) => i.productId),
+      );
       let subtotal = 0;
       let taxAmount = 0;
       let lineDiscounts = 0;
@@ -89,7 +95,8 @@ export class QuotationService {
         });
         if (!product) throw new NotFoundException(`Producto ${itemDto.productId} no encontrado`);
 
-        const lineSubtotal = Number(itemDto.quantity) * Number(itemDto.unitPrice);
+        const unitPrice = customPrices.get(itemDto.productId) ?? Number(itemDto.unitPrice);
+        const lineSubtotal = Number(itemDto.quantity) * unitPrice;
 
         let lineDiscount = 0;
         let discountPct = itemDto.discount || 0;
@@ -109,7 +116,7 @@ export class QuotationService {
           quotation: savedQuotation,
           product,
           quantity: itemDto.quantity,
-          unitPrice: itemDto.unitPrice,
+          unitPrice,
           discount: discountPct,
           discountAmount: lineDiscount,
           discountType: itemDto.discountType || DiscountType.PERCENTAGE,
@@ -217,6 +224,11 @@ export class QuotationService {
       let taxAmount = 0;
       let lineDiscounts = 0;
 
+      const customPrices = await this.customerProductPriceService.getActivePriceMap(
+        dto.customerId,
+        dto.items.map((i) => i.productId),
+      );
+
       // Re-create items
       for (const itemDto of dto.items) {
         const product = await this.productRepository.findOne({
@@ -224,7 +236,8 @@ export class QuotationService {
         });
         if (!product) throw new NotFoundException(`Producto ${itemDto.productId} no encontrado`);
 
-        const lineSubtotal = Number(itemDto.quantity) * Number(itemDto.unitPrice);
+        const unitPrice = customPrices.get(itemDto.productId) ?? Number(itemDto.unitPrice);
+        const lineSubtotal = Number(itemDto.quantity) * unitPrice;
 
         let lineDiscount = 0;
         let discountPct = itemDto.discount || 0;
@@ -244,7 +257,7 @@ export class QuotationService {
           quotation: { id } as any,
           product,
           quantity: itemDto.quantity,
-          unitPrice: itemDto.unitPrice,
+          unitPrice,
           discount: discountPct,
           discountAmount: lineDiscount,
           discountType: itemDto.discountType || DiscountType.PERCENTAGE,

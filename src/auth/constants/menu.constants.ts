@@ -136,6 +136,12 @@ export const MENU_ITEMS: MenuItem[] = [
     permission: 'sales.view',
     children: [
       {
+        label: 'Clientes',
+        icon: 'pi pi-users',
+        route: '/sales/customers',
+        permission: 'customers.manage',
+      },
+      {
         label: 'Cotizaciones',
         icon: 'pi pi-file-edit',
         route: '/sales/quotations',
@@ -266,12 +272,6 @@ export const MENU_ITEMS: MenuItem[] = [
         icon: 'pi pi-map',
         route: '/logistics/areas',
         permission: 'areas.manage',
-      },
-      {
-        label: 'Clientes',
-        icon: 'pi pi-users',
-        route: '/sales/customers',
-        permission: 'customers.manage',
       },
       {
         label: 'Métodos de Pago',

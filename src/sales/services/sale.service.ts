@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { Sale, SaleDetail, SaleStatus, DiscountType, SalePayment, PaymentStatus } from '../entities';
 import { DataSource, DeepPartial, IsNull, Like, Repository } from 'typeorm';
-import { CustomerService, DiscountCodeService } from '.';
+import { CustomerService, DiscountCodeService, CustomerProductPriceService } from '.';
 import { BranchService, InventoryMovementService, ProductService } from 'src/logistics/services';
 import { CreateSaleDto, PaginatedSaleResponseDto, QuickSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
@@ -28,6 +28,7 @@ export class SaleService {
     private readonly saleDetailRepository: Repository<SaleDetail>,
 
     private readonly customerService: CustomerService,
+    private readonly customerProductPriceService: CustomerProductPriceService,
     private readonly discountCodeService: DiscountCodeService,
     private readonly productService: ProductService,
     private readonly inventoryMovementService: InventoryMovementService,
@@ -217,14 +218,20 @@ export class SaleService {
 
       const savedSale = await qr.manager.save(sale);
 
+      const customPrices = await this.customerProductPriceService.getActivePriceMap(
+        dto.customerId,
+        dto.details.map((d) => d.productId),
+      );
+
       let subtotal = 0;
       let taxAmount = 0;
       let lineDiscounts = 0;
 
       for (const detailDto of dto.details) {
         const product = await this.productService.findOne(detailDto.productId);
+        const unitPrice = customPrices.get(detailDto.productId) ?? Number(detailDto.unitPrice);
 
-        const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
+        const lineSubtotal = detailDto.quantity * unitPrice;
 
         let lineDiscount = 0;
         let discountPct = detailDto.discount || 0;
@@ -244,7 +251,7 @@ export class SaleService {
           sale: savedSale,
           product: { id: detailDto.productId },
           quantity: detailDto.quantity,
-          unitPrice: detailDto.unitPrice,
+          unitPrice,
           discount: discountPct,
           discountAmount: lineDiscount,
           discountType: detailDto.discountType || DiscountType.PERCENTAGE,
@@ -463,13 +470,18 @@ export class SaleService {
       const savedSale = await qr.manager.save(sale);
 
       // 3. Create Details and calculate totals
+      const customPrices = await this.customerProductPriceService.getActivePriceMap(
+        dto.customerId,
+        dto.details.map((d) => d.productId),
+      );
       let subtotal = 0;
       let taxAmount = 0;
       let lineDiscounts = 0;
 
       for (const detailDto of dto.details) {
         const product = await this.productService.findOne(detailDto.productId);
-        const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
+        const unitPrice = customPrices.get(detailDto.productId) ?? Number(detailDto.unitPrice);
+        const lineSubtotal = detailDto.quantity * unitPrice;
         let lineDiscount = 0;
         let discountPct = detailDto.discount || 0;
 
@@ -488,7 +500,7 @@ export class SaleService {
           sale: savedSale,
           product: { id: detailDto.productId },
           quantity: detailDto.quantity,
-          unitPrice: detailDto.unitPrice,
+          unitPrice,
           discount: discountPct,
           discountAmount: lineDiscount,
           discountType: detailDto.discountType || DiscountType.PERCENTAGE,
@@ -1239,13 +1251,18 @@ export class SaleService {
 
         await qr.manager.delete(SaleDetail, { sale: { id: sale.id } });
 
+        const customPrices = await this.customerProductPriceService.getActivePriceMap(
+          dto.customerId || sale.customer?.id,
+          dto.details.map((d) => d.productId),
+        );
         let subtotal = 0;
         let taxAmount = 0;
         let lineDiscounts = 0;
         const newDetails: SaleDetail[] = [];
 
         for (const detailDto of dto.details) {
-          const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
+          const unitPrice = customPrices.get(detailDto.productId) ?? Number(detailDto.unitPrice);
+          const lineSubtotal = detailDto.quantity * unitPrice;
           const lineDiscount = (lineSubtotal * (detailDto.discount || 0)) / 100;
           const lineAfterDiscount = lineSubtotal - lineDiscount;
           const lineTax = sale.applyTax ? (lineAfterDiscount * (detailDto.taxPercentage ?? 12)) / 100 : 0;
@@ -1255,7 +1272,7 @@ export class SaleService {
             sale: sale,
             product: { id: detailDto.productId },
             quantity: detailDto.quantity,
-            unitPrice: detailDto.unitPrice,
+            unitPrice,
             discount: detailDto.discount || 0,
             discountAmount: lineDiscount,
             taxPercentage: sale.applyTax ? (detailDto.taxPercentage ?? 12) : 0,

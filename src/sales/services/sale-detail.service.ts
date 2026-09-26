@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Sale, SaleDetail, SaleStatus } from '../entities';
 import { IsNull, Repository } from 'typeorm';
 import { ProductService } from 'src/logistics/services';
+import { CustomerProductPriceService } from './customer-product-price.service';
 import { CreateSaleDetailDto, SaleDetailResponseDto, UpdateSaleDetailDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 
@@ -14,11 +15,13 @@ export class SaleDetailService {
     @InjectRepository(Sale)
     private readonly saleRepository: Repository<Sale>,
     private readonly productService: ProductService,
+    private readonly customerProductPriceService: CustomerProductPriceService,
   ) {}
 
   async create(detailDto: CreateSaleDetailDto, saleId: string): Promise<SaleDetailResponseDto> {
     const sale = await this.saleRepository.findOne({
       where: { id: saleId, deletedAt: IsNull() },
+      relations: ['customer'],
     });
 
     if (!sale) {
@@ -36,7 +39,9 @@ export class SaleDetailService {
       throw new BadRequestException(`El producto con ID ${detailDto.productId} no existe`);
     }
 
-    const lineSubtotal = detailDto.quantity * detailDto.unitPrice;
+    const customPrice = await this.customerProductPriceService.getActivePrice(sale.customer?.id, detailDto.productId);
+    const unitPrice = customPrice ?? Number(detailDto.unitPrice);
+    const lineSubtotal = detailDto.quantity * unitPrice;
     const lineDiscount = detailDto.discountAmount || (lineSubtotal * (detailDto.discount || 0)) / 100;
     const lineTax = detailDto.taxAmount || (lineSubtotal * (detailDto.taxPercentage || 0)) / 100;
     const lineTotal = lineSubtotal - lineDiscount + lineTax;
@@ -45,7 +50,7 @@ export class SaleDetailService {
       sale: { id: saleId },
       product: { id: detailDto.productId },
       quantity: detailDto.quantity,
-      unitPrice: detailDto.unitPrice,
+      unitPrice,
       discount: detailDto.discount || 0,
       discountAmount: lineDiscount,
       taxPercentage: detailDto.taxPercentage || 0,

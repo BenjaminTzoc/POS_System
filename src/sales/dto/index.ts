@@ -1,5 +1,11 @@
 export { CreateCustomerCategoryDto, UpdateCustomerCategoryDto, CustomerCategoryResponseDto } from './customer-category.dto';
 export { CreateCustomerDto, UpdateCustomerDto, CustomerResponseDto } from './customer.dto';
+export {
+  UpsertCustomerProductPriceDto,
+  UpdateCustomerProductPriceDto,
+  CustomerProductPriceResponseDto,
+  AppliedProductPriceDto,
+} from './customer-product-price.dto';
 export { CreateDiscountCodeDto, UpdateDiscountCodeDto, DiscountCodeResponseDto } from './discount-code.dto';
 export { CreateSaleDetailDto, UpdateSaleDetailDto, SaleDetailResponseDto } from './sale-detail.dto';
 export { UpdateDetailStatusDto } from './update-detail-status.dto';

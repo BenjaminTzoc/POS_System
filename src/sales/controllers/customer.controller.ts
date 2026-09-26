@@ -1,6 +1,13 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { CustomerService } from '../services/customer.service';
+import { CustomerProductPriceService } from '../services/customer-product-price.service';
 import { CreateCustomerDto, CustomerResponseDto, UpdateCustomerDto } from '../dto';
+import {
+  AppliedProductPriceDto,
+  CustomerProductPriceResponseDto,
+  UpdateCustomerProductPriceDto,
+  UpsertCustomerProductPriceDto,
+} from '../dto/customer-product-price.dto';
 import { Permissions, Public } from 'src/auth/decorators';
 import { isSuperAdmin } from 'src/common/utils/user-scope.util';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
@@ -9,7 +16,10 @@ import { PermissionsGuard } from 'src/auth/guards/permissions.guard';
 @Controller('customers')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class CustomerController {
-  constructor(private readonly customerService: CustomerService) {}
+  constructor(
+    private readonly customerService: CustomerService,
+    private readonly productPriceService: CustomerProductPriceService,
+  ) {}
 
   @Post()
   @Public()
@@ -62,6 +72,53 @@ export class CustomerController {
   findByNit(@Req() req, @Param('nit') nit: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto> {
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
     return this.customerService.findByNit(nit, showDeleted);
+  }
+
+  @Get(':id/product-prices')
+  @Permissions('customers.view')
+  listProductPrices(@Param('id', ParseUUIDPipe) id: string): Promise<CustomerProductPriceResponseDto[]> {
+    return this.productPriceService.listByCustomer(id);
+  }
+
+  @Get(':id/applied-price/:productId')
+  @Permissions('customers.view')
+  getAppliedPrice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('productId', ParseUUIDPipe) productId: string,
+  ): Promise<AppliedProductPriceDto> {
+    return this.productPriceService.getApplied(id, productId);
+  }
+
+  @Put(':id/product-prices/:productId')
+  @Permissions('customers.manage')
+  upsertProductPrice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('productId', ParseUUIDPipe) productId: string,
+    @Body() dto: UpdateCustomerProductPriceDto,
+  ): Promise<CustomerProductPriceResponseDto> {
+    if (dto.price === undefined) {
+      return this.productPriceService.update(id, productId, dto);
+    }
+    return this.productPriceService.upsert(id, { ...dto, productId, price: dto.price });
+  }
+
+  @Put(':id/product-prices')
+  @Permissions('customers.manage')
+  upsertProductPriceBody(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpsertCustomerProductPriceDto,
+  ): Promise<CustomerProductPriceResponseDto> {
+    return this.productPriceService.upsert(id, dto);
+  }
+
+  @Delete(':id/product-prices/:productId')
+  @Permissions('customers.manage')
+  @HttpCode(HttpStatus.OK)
+  removeProductPrice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('productId', ParseUUIDPipe) productId: string,
+  ): Promise<{ message: string }> {
+    return this.productPriceService.remove(id, productId);
   }
 
   @Get(':id')
