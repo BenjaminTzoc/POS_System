@@ -13,9 +13,18 @@ export {
   InventoryMovementUnitDto,
 } from './inventory-movement.dto';
 export { CreateInventoryDto, UpdateInventoryDto, InventoryResponseDto, BulkCreateInventoryDto, BulkCreateInventoryItemDto } from './inventory.dto';
-export { CreateProductDto, UpdateProductDto, ProductResponseDto, BranchProductResponseDto, MinimalProductResponseDto, MinimalProductUnitDto } from './product.dto';
+export { CreateProductDto, UpdateProductDto, ProductResponseDto, BranchProductResponseDto, MinimalProductResponseDto, MinimalProductUnitDto, PaginatedProductResponseDto } from './product.dto';
 export { CreateUnitDto, UpdateUnitDto, UnitResponseDto } from './unit.dto';
 export { CreateInventoryTransferDto, UpdateInventoryTransferDto, UpdateTransferStatusDto, InventoryTransferResponseDto, InventoryTransferListResponseDto } from './inventory-transfer.dto';
 export { CreateAreaDto, UpdateAreaDto, AreaResponseDto } from './area.dto';
 export { CreateTruckDto, UpdateTruckDto, TruckResponseDto } from './truck.dto';
 export { CreateTripDto, UpdateTripDto, TripResponseDto, CreateTripItemDto, AddTripItemsDto, TripItemResponseDto, CreateTripIncidentDto, DeliverSaleItemDto, ReceiveTripReturnDto, ReturnDiscrepancyReason } from './trip.dto';
+export {
+  UpdateBranchSettlementDto,
+  ReceiveBranchSettlementDto,
+  CreateBranchSettlementDraftDto,
+  BranchSettlementResponseDto,
+  CreateBranchSettlementIncidentDto,
+  ResolveBranchSettlementIncidentDto,
+  UpdateBranchSettlementIncidentDto,
+} from './branch-settlement.dto';

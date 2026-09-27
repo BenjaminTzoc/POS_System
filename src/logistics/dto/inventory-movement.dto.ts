@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, Min, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, IsEnum, Min, Max, IsInt, IsDateString } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { MovementType, MovementStatus, MovementConcept } from '../entities/inventory-movement.entity';
@@ -109,15 +109,30 @@ export class CancelMovementDto {
 export class QueryInventoryMovementDto {
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
   page?: number = 1;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber()
+  @IsInt()
   @Min(1)
+  @Max(200)
   limit?: number = 20;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  pageSize?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  rows?: number;
 
   @IsOptional()
   @IsString()

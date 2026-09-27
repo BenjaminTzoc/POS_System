@@ -5,7 +5,7 @@ import { SaleStatus } from 'src/sales/entities';
 import { IsNull, Repository } from 'typeorm';
 import { CategoryService } from './category.service';
 import { UnitService } from './unit.service';
-import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto, MinimalProductResponseDto } from '../dto';
+import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto, MinimalProductResponseDto, PaginatedProductResponseDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
 import { FilesService } from './files.service';
 import { StockAvailability, ProductType } from '../entities/product.entity';
@@ -253,7 +253,9 @@ export class ProductService {
     excludeTypes?: string[],
     manageStock?: boolean,
     minimal: boolean = false,
-  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
+    pagination?: { page: number; limit: number } | null,
+    search?: string,
+  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[] | PaginatedProductResponseDto> {
     if (minimal) {
       const minimalQuery = this.productRepository
         .createQueryBuilder('product')
@@ -323,7 +325,24 @@ export class ProductService {
         minimalQuery.andWhere('product.manageStock = :manageStock', { manageStock });
       }
 
+      this.applyProductSearch(minimalQuery, search);
       minimalQuery.orderBy('product.name', 'ASC');
+
+      if (pagination) {
+        const total = await minimalQuery.clone().getCount();
+        const products = await minimalQuery
+          .skip((pagination.page - 1) * pagination.limit)
+          .take(pagination.limit)
+          .getMany();
+        const items = plainToInstance(MinimalProductResponseDto, products, { excludeExtraneousValues: true });
+        return {
+          items,
+          total,
+          page: pagination.page,
+          limit: pagination.limit,
+          totalPages: Math.ceil(total / pagination.limit) || 1,
+        };
+      }
 
       const products = await minimalQuery.getMany();
       return plainToInstance(MinimalProductResponseDto, products, { excludeExtraneousValues: true });
@@ -403,10 +422,40 @@ export class ProductService {
       query.andWhere('product.manageStock = :manageStock', { manageStock });
     }
 
+    this.applyProductSearch(query, search);
     query.orderBy('product.name', 'ASC');
+
+    if (pagination) {
+      const total = await query.clone().getCount();
+      const pageProducts = await query
+        .skip((pagination.page - 1) * pagination.limit)
+        .take(pagination.limit)
+        .getMany();
+      const items = this.mapProductsToDto(pageProducts);
+      return {
+        items,
+        total,
+        page: pagination.page,
+        limit: pagination.limit,
+        totalPages: Math.ceil(total / pagination.limit) || 1,
+      };
+    }
 
     const products = await query.getMany();
 
+    return this.mapProductsToDto(products);
+  }
+
+  private applyProductSearch(query: { andWhere: Function }, search?: string): void {
+    if (!search?.trim()) return;
+    const term = `%${search.trim().toLowerCase()}%`;
+    query.andWhere(
+      `(LOWER(product.name) LIKE :search OR LOWER(COALESCE(product.sku, '')) LIKE :search OR LOWER(COALESCE(product.barcode, '')) LIKE :search)`,
+      { search: term },
+    );
+  }
+
+  private mapProductsToDto(products: Product[]): ProductResponseDto[] {
     return products.map((p) => {
       // Calcular stock total del producto raíz (debe ser 0 si es maestro sin stock directo)
       const rootStock = p.inventories?.reduce((sum, inv) => sum + Number(inv.stock), 0) || 0;

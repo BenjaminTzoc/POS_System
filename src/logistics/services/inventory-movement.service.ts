@@ -189,7 +189,8 @@ export class InventoryMovementService {
 
   async findAll(query?: QueryInventoryMovementDto): Promise<PaginatedInventoryMovementResponseDto> {
     const page = Math.max(1, Number(query?.page) || 1);
-    const limit = Math.max(1, Math.min(100, Number(query?.limit) || 20));
+    const rawLimit = query?.pageSize ?? query?.rows ?? query?.limit;
+    const limit = Math.max(1, Math.min(200, Number(rawLimit) || 20));
     const skip = (page - 1) * limit;
 
     const qb = this.movementRepository.createQueryBuilder('movement')

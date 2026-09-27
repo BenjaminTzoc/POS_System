@@ -9,3 +9,5 @@ export { InventoryTransferController } from './inventory-transfer.controller';
 export { RouteDispatchController } from './route-dispatch.controller';
 export { TruckController } from './truck.controller';
 export { TripController } from './trip.controller';
+export { BranchSettlementController } from './branch-settlement.controller';
+export { BranchSettlementIncidentsController } from './branch-settlement-incidents.controller';

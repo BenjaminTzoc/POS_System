@@ -10,3 +10,4 @@ export { InventoryTransferService } from './inventory-transfer.service';
 export { RouteDispatchService } from './route-dispatch.service';
 export { TruckService } from './truck.service';
 export { TripService } from './trip.service';
+export { BranchSettlementService } from './branch-settlement.service';

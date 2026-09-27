@@ -15,3 +15,6 @@ export { TripItem, TripItemStatus, TripItemType } from './trip-item.entity';
 export { TripReturn, TripReturnStatus } from './trip-return.entity';
 export { TripReturnItem } from './trip-return-item.entity';
 export { TripIncident, TripIncidentStatus } from './trip-incident.entity';
+export { BranchSettlement, BranchSettlementStatus } from './branch-settlement.entity';
+export { BranchSettlementItem } from './branch-settlement-item.entity';
+export { BranchSettlementIncident, BranchSettlementIncidentStatus } from './branch-settlement-incident.entity';

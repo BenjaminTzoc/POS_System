@@ -181,17 +181,29 @@ export const MENU_ITEMS: MenuItem[] = [
     route: '/admin',
     permission: 'admin.view',
     children: [
-      {
-        label: 'Ordenes de compra',
-        icon: 'pi pi-shopping-cart',
-        route: '/purchases/orders',
-        permission: 'purchases.view',
-      },
+      /*{
+        label: 'Datos de la Empresa',
+        icon: 'pi pi-building',
+        route: '/admin/company-settings',
+        permission: 'admin.view',
+      },*/
       {
         label: 'Historial de Cajas',
         icon: 'pi pi-history',
         route: '/sales/cash-history',
         permission: 'cash.view',
+      },
+      {
+        label: 'Liquidación Diaria',
+        icon: 'pi pi-calculator',
+        route: '/logistics/settlements',
+        permission: 'logistics.settlements',
+      },
+      {
+        label: 'Ordenes de compra',
+        icon: 'pi pi-shopping-cart',
+        route: '/purchases/orders',
+        permission: 'purchases.view',
       },
       {
         label: 'Despiece (Cortes)',
@@ -210,25 +222,13 @@ export const MENU_ITEMS: MenuItem[] = [
         icon: 'pi pi-receipt',
         route: '/production/recipes',
         permission: 'production.recipes',
-      },
-      {
+      }
+      /*{
         label: 'Despachos de Ruta',
         icon: 'pi pi-send',
         route: '/logistics/dispatches',
         permission: 'logistics.dispatches',
-      },
-      {
-        label: 'Liquidación Diaria',
-        icon: 'pi pi-calculator',
-        route: '/logistics/settlements',
-        permission: 'logistics.settlements',
-      },
-      {
-        label: 'Datos de la Empresa',
-        icon: 'pi pi-building',
-        route: '/admin/company-settings',
-        permission: 'admin.view',
-      }
+      },*/
     ]
   },
   {

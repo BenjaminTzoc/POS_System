@@ -17,7 +17,7 @@ import { InventoryMovementService } from './inventory-movement.service';
 import { FilesService } from './files.service';
 import { MovementConcept, MovementStatus, MovementType } from '../entities/inventory-movement.entity';
 import { Inventory } from '../entities/inventory.entity';
-import { isSuperAdmin } from 'src/common/utils/user-scope.util';
+import { isAdminUser, isSuperAdmin } from 'src/common/utils/user-scope.util';
 import { TripGateway } from '../gateway/trip.gateway';
 
 @Injectable()
@@ -286,8 +286,9 @@ export class TripService {
   }
 
   async create(dto: CreateTripDto, user?: any): Promise<TripResponseDto> {
-    if (!isSuperAdmin(user) && user?.branch?.id !== dto.originBranchId) {
-      throw new ForbiddenException('Solo personal de la planta de origen puede crear viajes');
+    const canCreateFromAnyBranch = isSuperAdmin(user) || isAdminUser(user) || !!user?.branch?.isPlant;
+    if (!canCreateFromAnyBranch && user?.branch?.id !== dto.originBranchId) {
+      throw new ForbiddenException('No puede crear un viaje desde otra sucursal');
     }
 
     const originBranch = await this.branchRepository.findOne({

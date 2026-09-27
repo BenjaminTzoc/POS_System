@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, UploadedFile, UseInterceptors, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ProductService } from '../services';
-import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto, MinimalProductResponseDto } from '../dto';
+import { CreateProductDto, ProductResponseDto, UpdateProductDto, BranchProductResponseDto, MinimalProductResponseDto, PaginatedProductResponseDto } from '../dto';
 import { Permissions, Public } from 'src/auth/decorators';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -61,7 +61,12 @@ export class ProductController {
     @Query('excludeTypes') excludeTypes?: string,
     @Query('manageStock') manageStock?: string,
     @Query('minimal') minimal?: string,
-  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('rows') rows?: string,
+    @Query('search') search?: string,
+  ): Promise<ProductResponseDto[] | MinimalProductResponseDto[] | PaginatedProductResponseDto> {
     const user = req.user;
     const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
     const branchId = branchIdParam || user.branch?.id;
@@ -75,8 +80,33 @@ export class ProductController {
     const manageStockBool = manageStock === 'true' ? true : manageStock === 'false' ? false : undefined;
     const excludeTypesArray = excludeTypes ? excludeTypes.split(',') : undefined;
     const isMinimal = minimal === 'true';
+    const pagination = this.parseProductPaging(page, limit, pageSize, rows);
 
-    return this.productService.findAll(branchId, showDeleted, type, hasRecipeBool, isMasterBool, excludeTypesArray, manageStockBool, isMinimal);
+    return this.productService.findAll(
+      branchId,
+      showDeleted,
+      type,
+      hasRecipeBool,
+      isMasterBool,
+      excludeTypesArray,
+      manageStockBool,
+      isMinimal,
+      pagination,
+      search,
+    );
+  }
+
+  private parseProductPaging(
+    page?: string,
+    limit?: string,
+    pageSize?: string,
+    rows?: string,
+  ): { page: number; limit: number } | null {
+    if (page == null && limit == null && pageSize == null && rows == null) return null;
+    return {
+      page: Math.max(1, Number(page) || 1),
+      limit: Math.max(1, Math.min(200, Number(pageSize ?? rows ?? limit) || 20)),
+    };
   }
 
   @Get('search')

@@ -322,6 +322,14 @@ export class ProductResponseDto extends BaseEntity {
   declare deletedAt: Date | null;
 }
 
+export class PaginatedProductResponseDto {
+  items: ProductResponseDto[] | MinimalProductResponseDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export class UpdateProductImageDto {
   @IsNotEmpty()
   @IsString()

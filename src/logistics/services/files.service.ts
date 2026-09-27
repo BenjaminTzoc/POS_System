@@ -35,6 +35,10 @@ export class FilesService {
     return this.saveImage(file, 'caben-trip-incidents', 1600);
   }
 
+  async saveSettlementIncidentImage(file: Express.Multer.File): Promise<string> {
+    return this.saveImage(file, 'caben-settlement-incidents', 1600);
+  }
+
   async saveImage(file: Express.Multer.File, folder: string, maxSize = 800): Promise<string> {
     if (!file.mimetype || file.mimetype === 'application/octet-stream') {
       file.mimetype = 'image/jpeg';
