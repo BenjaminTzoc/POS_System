@@ -1,10 +1,12 @@
-import { Entity, Column, ManyToOne, JoinColumn, OneToMany, Unique } from 'typeorm';
+import { Entity, Column, ManyToOne, JoinColumn, OneToMany, Unique, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Branch, InventoryMovement, Product } from '.';
 import { columnNumericTransformer } from 'src/common/utils/transformers';
 
 @Entity('inventories')
 @Unique(['product', 'branch'])
+@Index('idx_inventories_branch_id', ['branch'])
+@Index('idx_inventories_product_id', ['product'])
 export class Inventory extends BaseEntity {
   @ManyToOne(() => Product, { eager: true, nullable: false })
   @JoinColumn({ name: 'product_id' })

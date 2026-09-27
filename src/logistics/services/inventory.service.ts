@@ -190,7 +190,7 @@ export class InventoryService {
       .where('inventory.deletedAt IS NULL');
 
     if (branchId) {
-      queryBuilder.andWhere('branch.id = :branchId', { branchId });
+      queryBuilder.andWhere('inventory.branch_id = :branchId', { branchId });
     }
 
     const inventories = await queryBuilder

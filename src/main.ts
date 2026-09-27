@@ -6,6 +6,8 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { json, urlencoded } from 'express';
+import { DataSource } from 'typeorm';
+import { ensureInventoryIndexes } from './common/db/ensure-inventory-indexes';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -63,6 +65,7 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3000;
+  await ensureInventoryIndexes(app.get(DataSource));
   await app.listen(port, '0.0.0.0');
 
   const logger = new Logger('Bootstrap');

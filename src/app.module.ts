@@ -28,6 +28,13 @@ import { SettingsModule } from './settings/settings.module';
       useFactory: (configService: ConfigService) => {
         const poolSize = Math.max(1, Number(configService.get('DB_POOL_SIZE', 3)) || 3);
         const useSsl = configService.get('DB_SSL') === 'true';
+        const syncFlag = (configService.get<string>('DB_SYNCHRONIZE') || '').toLowerCase();
+        const synchronize =
+          syncFlag === 'true'
+            ? true
+            : syncFlag === 'false'
+              ? false
+              : process.env.NODE_ENV !== 'production';
         return {
           type: 'postgres' as const,
           host: configService.get('DB_HOST', 'localhost'),
@@ -37,7 +44,7 @@ import { SettingsModule } from './settings/settings.module';
           database: configService.get('DB_NAME', 'sistema-inventario'),
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           autoLoadEntities: true,
-          synchronize: true,
+          synchronize,
           logging: configService.get('DB_LOGGING') === 'true' ? true : ['error'],
           ssl: useSsl,
           poolSize,
