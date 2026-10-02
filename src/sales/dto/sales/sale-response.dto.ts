@@ -67,6 +67,15 @@ export class SaleResponseDto extends BaseEntity {
   deliveryAddress?: string | null;
 
   @Expose()
+  guestCustomer?: {
+    name: string;
+    phone?: string;
+    email?: string;
+    nit?: string;
+    address?: string;
+  };
+
+  @Expose()
   @Type(() => CustomerResponseDto)
   customer: CustomerResponseDto | null;
 

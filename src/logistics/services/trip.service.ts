@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { Trip, TripStatus } from '../entities/trip.entity';
@@ -22,6 +22,8 @@ import { TripGateway } from '../gateway/trip.gateway';
 
 @Injectable()
 export class TripService {
+  private readonly logger = new Logger(TripService.name);
+
   constructor(
     @InjectRepository(Trip)
     private readonly tripRepository: Repository<Trip>,
@@ -524,6 +526,16 @@ export class TripService {
         tripId,
         tripStatus: TripStatus.ON_ROUTE,
       });
+
+      // Disparar notificaciones de WhatsApp con el PIN/OTP para las órdenes de venta del viaje
+      for (const item of trip.items) {
+        if (item.type === TripItemType.SALE_ORDER && item.sale?.id) {
+          this.sendTripSaleOtpWhatsApp(item.sale.id, trip).catch((err) => {
+            this.logger.error(`Error al disparar WhatsApp OTP para venta ${item.sale?.id}:`, err?.message || err);
+          });
+        }
+      }
+
       return this.findOne(tripId);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -1451,5 +1463,104 @@ export class TripService {
     const sales = await saleQuery.orderBy('sale.date', 'ASC').getMany();
 
     return { transfers, sales };
+  }
+
+  private normalizeWhatsAppPhone(phone: string): string {
+    let cleanPhone = phone.replace(/\D/g, '');
+    const defaultPrefix = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '502';
+    if (cleanPhone.length === 8) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    } else if (cleanPhone.length > 0 && !cleanPhone.startsWith(defaultPrefix)) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    }
+    return cleanPhone;
+  }
+
+  /**
+   * Envía mensaje por WhatsApp al cliente informándole que su pedido va en camino y proporcionando el PIN/OTP de entrega.
+   * Plantilla Meta (default confirmacion_entrega_orden):
+   * Body: Hola {{1}}, tu pedido de la orden #{{2}} está programado para entrega el {{3}}. Tu PIN de entrega es {{4}}. ...
+   */
+  async sendTripSaleOtpWhatsApp(saleId: string, trip: Trip): Promise<void> {
+    const sale = await this.saleRepository.findOne({
+      where: { id: saleId },
+      relations: ['customer'],
+    });
+
+    if (!sale) return;
+
+    const rawPhone = sale.customer?.phone || (sale.guestCustomer as any)?.phone;
+    if (!rawPhone) {
+      this.logger.warn(`Venta ${sale.invoiceNumber} no tiene teléfono para enviar código OTP de viaje`);
+      return;
+    }
+
+    if (!sale.deliveryOtp) {
+      this.logger.warn(`Venta ${sale.invoiceNumber} no tiene deliveryOtp generado`);
+      return;
+    }
+
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (!token || !phoneId) {
+      this.logger.warn('Credenciales de WhatsApp no configuradas para envío de código OTP de viaje');
+      return;
+    }
+
+    const customerName = sale.customer?.name || (sale.guestCustomer as any)?.name || 'Cliente';
+    const templateName = process.env.WHATSAPP_DELIVERY_OTP_TEMPLATE || 'confirmacion_entrega_orden';
+    const language = process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es_MX';
+    const cleanPhone = this.normalizeWhatsAppPhone(rawPhone);
+
+    // Formatear fecha de entrega (ej: 01/10/2026)
+    const rawDate = trip.date || trip.departureAt || new Date();
+    const dateObj = new Date(rawDate);
+    const formattedDate = !isNaN(dateObj.getTime())
+      ? `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()}`
+      : new Date().toLocaleDateString('es-GT');
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: cleanPhone,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: {
+          code: language,
+        },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: customerName },
+              { type: 'text', text: sale.invoiceNumber },
+              { type: 'text', text: formattedDate },
+              { type: 'text', text: sale.deliveryOtp },
+            ],
+          },
+        ],
+      },
+    };
+
+    try {
+      const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        this.logger.error(`Error enviando OTP de entrega WhatsApp para venta ${sale.invoiceNumber}: ${errText}`);
+      } else {
+        this.logger.log(`WhatsApp con PIN de entrega enviado exitosamente para venta ${sale.invoiceNumber} en viaje ${trip.tripNumber}`);
+      }
+    } catch (error: any) {
+      this.logger.error(`Fallo de conexión al enviar WhatsApp OTP para venta ${sale.invoiceNumber}:`, error?.message || error);
+    }
   }
 }

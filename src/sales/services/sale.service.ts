@@ -1627,15 +1627,27 @@ export class SaleService {
       const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
       const customerName = sale.customer?.name || sale.guestCustomer?.name || 'Cliente';
 
+      // Validación para variable 4: si requiere código de recepción o es entrega en tienda
+      const isDeliveryOrder = !!(
+        sale.deliveryAddress ||
+        sale.isPreorder ||
+        (sale.deliveryOtp && sale.status !== SaleStatus.DELIVERED)
+      );
+
+      let deliveryMessage = 'Entrega realizada en tienda.';
+      if (isDeliveryOrder && sale.deliveryOtp) {
+        deliveryMessage = `Tu código para recibir tu pedido es: *${sale.deliveryOtp}*.`;
+      }
+
       const payload = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to: cleanPhone,
         type: 'template',
         template: {
-          name: 'envio_ticket_pos',
+          name: process.env.WHATSAPP_SALE_TEMPLATE || 'envio_ticket_pos',
           language: {
-            code: 'es_MX',
+            code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es_MX',
           },
           components: [
             {
@@ -1656,6 +1668,7 @@ export class SaleService {
                 { type: 'text', text: customerName },
                 { type: 'text', text: sale.invoiceNumber },
                 { type: 'text', text: `${Number(sale.total).toFixed(2)}` },
+                { type: 'text', text: '' }, // Parámetro 4 vacío o configurable
               ],
             },
           ],

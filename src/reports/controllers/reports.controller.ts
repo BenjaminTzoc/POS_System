@@ -1,19 +1,57 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { ReportsService } from '../services/reports.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { User } from '../../common/decorators/user.decorator';
+import { Public } from '../../auth/decorators';
 import { isSuperAdmin } from '../../common/utils/user-scope.util';
 import { CustomerWeeklySummaryQueryDto } from '../dto/customer-weekly-summary.dto';
 import { TodayPulseQueryDto } from '../dto/today-pulse.dto';
 import { DashboardCalendarQueryDto } from '../dto/dashboard-calendar.dto';
 import { TodayPaymentsQueryDto } from '../dto/today-payments.dto';
+import { PdfService } from '../../common/pdf/pdf.service';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
+  @Get('weekly-consolidated/pdf')
+  @Public()
+  async getWeeklyConsolidatedPdf(
+    @Res() res: Response,
+    @Query('customerId') customerId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('branchId') branchId?: string,
+    @Query('customerName') customerName?: string,
+    @Query('nit') nit?: string,
+    @Query('phone') phone?: string,
+    @Query('address') address?: string,
+  ) {
+    const buffer = await this.reportsService.generateWeeklyConsolidatedPdf({
+      customerId,
+      startDate,
+      endDate,
+      branchId,
+      customerName,
+      nit,
+      phone,
+      address,
+    });
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename=Consolidado_Semanal.pdf',
+      'Content-Length': buffer.length,
+    });
+
+    res.end(buffer);
+  }
+
+
   @Get('dashboard')
+
   async getUnifiedDashboard(@User() user: any, @Query('days') days?: string, @Query('startDate') startDate?: string, @Query('endDate') endDate?: string, @Query('branchId') branchIdQuery?: string): Promise<any> {
     const branchId = isSuperAdmin(user) ? branchIdQuery : user.branch?.id;
     const numDays = days ? parseInt(days, 10) : 7;

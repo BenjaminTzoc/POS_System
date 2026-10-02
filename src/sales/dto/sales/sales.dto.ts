@@ -89,3 +89,4 @@ export class CreateSaleDto {
 }
 
 export class UpdateSaleDto extends PartialType(OmitType(CreateSaleDto, ['status'] as const)) {}
+

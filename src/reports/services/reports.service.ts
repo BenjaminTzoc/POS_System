@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Customer } from '../../sales/entities';
+import { Branch } from '../../logistics/entities';
+import { PdfService } from '../../common/pdf/pdf.service';
 import { SalesReportsService } from './sales-reports.service';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ConsolidatedReportsService } from './consolidated-reports.service';
@@ -9,6 +14,11 @@ import { TodayPaymentsService } from './today-payments.service';
 @Injectable()
 export class ReportsService {
   constructor(
+    @InjectRepository(Customer)
+    private readonly customerRepository: Repository<Customer>,
+    @InjectRepository(Branch)
+    private readonly branchRepository: Repository<Branch>,
+    private readonly pdfService: PdfService,
     private readonly salesReports: SalesReportsService,
     private readonly inventoryReports: InventoryReportsService,
     private readonly consolidatedReports: ConsolidatedReportsService,
@@ -16,6 +26,152 @@ export class ReportsService {
     private readonly todayPulse: TodayPulseService,
     private readonly todayPayments: TodayPaymentsService,
   ) {}
+
+  async generateWeeklyConsolidatedPdf(params: {
+    customerId?: string;
+    startDate?: string;
+    endDate?: string;
+    customerName?: string;
+    nit?: string;
+    phone?: string;
+    address?: string;
+    branchId?: string;
+  }): Promise<Buffer> {
+    let customerData: {
+      name: string;
+      nit: string;
+      phone: string;
+      address: string;
+      categoryName?: string;
+      lastPurchaseDate?: string | Date | null;
+    } = {
+      name: params.customerName || 'Consumidor Final',
+      nit: params.nit || 'C/F',
+      phone: params.phone || '',
+      address: params.address || '',
+    };
+
+    if (params.customerId) {
+      const customer = await this.customerRepository.findOne({
+        where: { id: params.customerId },
+        relations: ['category'],
+      });
+      if (customer) {
+        customerData = {
+          name: customer.name,
+          nit: customer.nit || 'C/F',
+          phone: customer.phone || '',
+          address: customer.address || '',
+          categoryName: customer.category?.name,
+          lastPurchaseDate: customer.lastPurchaseDate,
+        };
+      }
+    }
+
+    let weekRange = 'Semana Actual';
+    let weekStartDate = params.startDate;
+    if (!weekStartDate) {
+      const now = new Date();
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(now.setDate(diff));
+      weekStartDate = monday.toISOString().split('T')[0];
+    }
+
+    if (params.startDate && params.endDate) {
+      weekRange = `${params.startDate} al ${params.endDate}`;
+    } else if (params.startDate) {
+      weekRange = `Desde ${params.startDate}`;
+    }
+
+    // Obtener datos consolidados si existen
+    let metrics = { totalSpent: 0, orderCount: 0, avgTicket: 0 };
+    let days: Array<{ day: string; total: number }> = [
+      { day: 'Lun', total: 0 },
+      { day: 'Mar', total: 0 },
+      { day: 'Mié', total: 0 },
+      { day: 'Jue', total: 0 },
+      { day: 'Vie', total: 0 },
+      { day: 'Sáb', total: 0 },
+      { day: 'Dom', total: 0 },
+    ];
+    let financial = {
+      paidAmount: 0,
+      pendingAmount: 0,
+      creditLimit: 0,
+      creditUsed: 0,
+    };
+
+    let mix: Array<{
+      productName: string;
+      quantity: number;
+      unit: string;
+      revenue: number;
+      share: number;
+    }> = [];
+
+    try {
+      const summary = await this.customerWeeklySummary.getWeeklySummary(weekStartDate, params.branchId, 200);
+      const targetItem = summary.customers.find((c) =>
+        params.customerId ? c.id === params.customerId : c.name.toLowerCase() === customerData.name.toLowerCase()
+      );
+
+      if (targetItem) {
+        metrics = {
+          totalSpent: targetItem.total,
+          orderCount: targetItem.orderCount,
+          avgTicket: targetItem.averageTicket,
+        };
+        days = targetItem.days.map((d) => ({
+          day: d.day,
+          total: d.total,
+        }));
+        financial = {
+          paidAmount: targetItem.paidAmount,
+          pendingAmount: targetItem.pendingAmount,
+          creditLimit: targetItem.creditLimit,
+          creditUsed: targetItem.creditUsed,
+        };
+        if (targetItem.mix && targetItem.mix.length > 0) {
+          mix = targetItem.mix.map((m) => ({
+            productName: m.productName,
+            quantity: m.quantity,
+            unit: m.unit,
+            revenue: m.revenue,
+            share: m.share,
+          }));
+        }
+        if (targetItem.lastPurchaseDate) {
+          customerData.lastPurchaseDate = targetItem.lastPurchaseDate;
+        }
+      }
+    } catch (e) {
+      // Fallback a valores por defecto si no encuentra semana válida
+    }
+
+    let branchName = 'Todas las sucursales';
+    if (params.branchId) {
+      const branch = await this.branchRepository.findOne({ where: { id: params.branchId } });
+      if (branch) {
+        branchName = branch.name;
+      }
+    }
+
+    return this.pdfService.generateWeeklyConsolidatedPdf({
+      customer: customerData,
+      emission: {
+        date: new Date(),
+        weekRange,
+        branchName,
+        reportType: 'Consolidado por Cliente',
+      },
+      metrics,
+      days,
+      financial,
+      mix,
+    });
+  }
+
 
   // 1. Actividad en ventas (Trends)
   getSalesTrends(branchId?: string, days: number = 7, start?: Date, end?: Date, frequency?: any) {
