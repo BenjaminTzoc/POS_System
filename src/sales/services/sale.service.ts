@@ -1668,7 +1668,7 @@ export class SaleService {
                 { type: 'text', text: customerName },
                 { type: 'text', text: sale.invoiceNumber },
                 { type: 'text', text: `${Number(sale.total).toFixed(2)}` },
-                { type: 'text', text: '' }, // Parámetro 4 vacío o configurable
+                { type: 'text', text: ' ' }, // Parámetro 4 vacío (un espacio en blanco requerido por Meta API)
               ],
             },
           ],
