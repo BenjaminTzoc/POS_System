@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { ReportsService } from '../services/reports.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -10,6 +10,7 @@ import { TodayPulseQueryDto } from '../dto/today-pulse.dto';
 import { DashboardCalendarQueryDto } from '../dto/dashboard-calendar.dto';
 import { TodayPaymentsQueryDto } from '../dto/today-payments.dto';
 import { PdfService } from '../../common/pdf/pdf.service';
+import { SendWeeklyConsolidatedWhatsAppDto } from '../dto/send-weekly-consolidated-whatsapp.dto';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard)
@@ -47,6 +48,14 @@ export class ReportsController {
     });
 
     res.end(buffer);
+  }
+
+  @Post('weekly-consolidated/send-whatsapp')
+  @HttpCode(HttpStatus.OK)
+  async sendWeeklyConsolidatedWhatsApp(
+    @Body() dto: SendWeeklyConsolidatedWhatsAppDto,
+  ): Promise<{ message: string }> {
+    return this.reportsService.sendWeeklyConsolidatedWhatsApp(dto);
   }
 
 

@@ -99,29 +99,6 @@ export class SeedService {
         Number(catalog.categories) > 0 ||
         Number(catalog.areas) > 0;
 
-      const permissionsList = [
-        { name: 'auth.manage', description: 'Administrar usuarios, roles y permisos', module: 'auth', action: 'manage' },
-        { name: 'logistics.manage', description: 'Administrar inventarios y despachos', module: 'logistics', action: 'manage' },
-        { name: 'sales.manage', description: 'Administrar ventas', module: 'sales', action: 'manage' },
-        { name: 'purchases.manage', description: 'Administrar compras', module: 'purchases', action: 'manage' },
-        { name: 'production.manage', description: 'Administrar producción', module: 'production', action: 'manage' },
-        { name: 'reports.view', description: 'Ver reportes', module: 'reports', action: 'view' },
-      ];
-
-      const savedPermissions: Permission[] = [];
-      for (const p of permissionsList) {
-        const permission = queryRunner.manager.create(Permission, p);
-        savedPermissions.push(await queryRunner.manager.save(permission));
-      }
-
-      const superAdminRole = queryRunner.manager.create(Role, {
-        name: 'SuperAdmin',
-        description: 'Acceso total al sistema',
-        isSuperAdmin: true,
-        permissions: savedPermissions,
-      });
-      await queryRunner.manager.save(superAdminRole);
-
       const planta = queryRunner.manager.create(Branch, {
         name: 'Planta Central',
         address: 'Ciudad de Guatemala',
@@ -142,17 +119,6 @@ export class SeedService {
         const paymentMethod = queryRunner.manager.create(PaymentMethod, pm);
         await queryRunner.manager.save(paymentMethod);
       }
-
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      const adminUser = queryRunner.manager.create(User, {
-        name: 'Administrador',
-        email: 'admin@pos.com',
-        password: hashedPassword,
-        roles: [superAdminRole],
-        permissions: savedPermissions,
-        emailVerified: true,
-      });
-      await queryRunner.manager.save(adminUser);
 
       const defaultCustomerCategory = queryRunner.manager.create(CustomerCategory, {
         name: 'General',

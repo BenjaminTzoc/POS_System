@@ -1508,16 +1508,26 @@ export class TripService {
     }
 
     const customerName = sale.customer?.name || (sale.guestCustomer as any)?.name || 'Cliente';
-    const templateName = process.env.WHATSAPP_DELIVERY_OTP_TEMPLATE || 'confirmacion_entrega_orden';
+    const templateName = process.env.WHATSAPP_DELIVERY_OTP_TEMPLATE || 'appointment_confirmed';
     const language = process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es_MX';
     const cleanPhone = this.normalizeWhatsAppPhone(rawPhone);
 
-    // Formatear fecha de entrega (ej: 01/10/2026)
+    // Formatear fecha de entrega (ej: Octubre 02, 2026)
     const rawDate = trip.date || trip.departureAt || new Date();
     const dateObj = new Date(rawDate);
-    const formattedDate = !isNaN(dateObj.getTime())
-      ? `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()}`
-      : new Date().toLocaleDateString('es-GT');
+    const months = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    let formattedDate: string;
+    if (!isNaN(dateObj.getTime())) {
+      const monthName = months[dateObj.getMonth()];
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const year = dateObj.getFullYear();
+      formattedDate = `${monthName} ${day}, ${year}`;
+    } else {
+      formattedDate = new Date().toLocaleDateString('es-GT');
+    }
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -1534,8 +1544,8 @@ export class TripService {
             type: 'body',
             parameters: [
               { type: 'text', text: customerName },
-              { type: 'text', text: sale.invoiceNumber },
               { type: 'text', text: formattedDate },
+              { type: 'text', text: sale.invoiceNumber },
               { type: 'text', text: sale.deliveryOtp },
             ],
           },

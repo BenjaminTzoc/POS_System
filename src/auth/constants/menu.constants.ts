@@ -74,13 +74,13 @@ export const RECURRENT_MENU: MenuItem[] = [
     label: 'Camiones',
     icon: 'pi pi-truck',
     route: '/logistics/trucks',
-    permission: '',
+    permission: 'logistics.trucks',
   },
   {
     label: 'Planificación de Viajes',
     icon: 'pi pi-map',
     route: '/logistics/trips',
-    permission: '',
+    permission: 'logistics.trips',
   },
   {
     label: 'Órdenes de Compra',
@@ -159,19 +159,19 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Logística',
     icon: 'pi pi-truck',
     route: '/logistics',
-    permission: '',
+    permission: 'logistics.view',
     children: [
       {
         label: 'Vehículos',
         icon: 'pi pi-car',
         route: '/logistics/trucks',
-        permission: '',
+        permission: 'logistics.trucks',
       },
       {
         label: 'Viajes',
         icon: 'pi pi-map',
         route: '/logistics/trips',
-        permission: '',
+        permission: 'logistics.trips',
       },
     ],
   },

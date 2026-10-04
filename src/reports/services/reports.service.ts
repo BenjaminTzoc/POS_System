@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Customer } from '../../sales/entities';
@@ -10,6 +10,7 @@ import { ConsolidatedReportsService } from './consolidated-reports.service';
 import { CustomerWeeklySummaryService } from './customer-weekly-summary.service';
 import { TodayPulseService } from './today-pulse.service';
 import { TodayPaymentsService } from './today-payments.service';
+import { SendWeeklyConsolidatedWhatsAppDto } from '../dto/send-weekly-consolidated-whatsapp.dto';
 
 @Injectable()
 export class ReportsService {
@@ -260,5 +261,151 @@ export class ReportsService {
   // 15. Tendencias mensuales por producto
   getMonthlyProductSalesTrends(month?: number, year?: number, branchId?: string, limit?: number, page?: number) {
     return this.salesReports.getMonthlyProductSalesTrends(month, year, branchId, limit, page);
+  }
+
+  async uploadMediaToMeta(pdfBuffer: Buffer, fileName: string): Promise<string> {
+    const token = process.env.WHATSAPP_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (!token || !phoneId) {
+      throw new BadRequestException('Las credenciales de WhatsApp no están configuradas');
+    }
+
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
+    formData.append('file', blob, fileName);
+    formData.append('messaging_product', 'whatsapp');
+
+    const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/media`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Meta Media Upload Error (Weekly Consolidated):', errText);
+      throw new InternalServerErrorException(`Fallo al subir el documento a Meta: ${errText}`);
+    }
+
+    const result = (await response.json()) as { id: string };
+    return result.id;
+  }
+
+  async sendWeeklyConsolidatedWhatsApp(dto: SendWeeklyConsolidatedWhatsAppDto): Promise<{ message: string }> {
+    let customerName = dto.customerName || 'Cliente';
+    let phone = dto.phone;
+
+    if (dto.customerId) {
+      const customer = await this.customerRepository.findOne({
+        where: { id: dto.customerId },
+      });
+      if (customer) {
+        if (!customerName || customerName === 'Cliente') {
+          customerName = customer.name;
+        }
+        if (!phone) {
+          phone = customer.phone || undefined;
+        }
+      }
+    }
+
+    if (!phone) {
+      throw new BadRequestException('El cliente no tiene un número de teléfono asociado para enviar WhatsApp');
+    }
+
+    let cleanPhone = phone.replace(/\D/g, '');
+    const defaultPrefix = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '502';
+    if (cleanPhone.length === 8) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    } else if (cleanPhone.length > 0 && !cleanPhone.startsWith(defaultPrefix)) {
+      cleanPhone = defaultPrefix + cleanPhone;
+    }
+
+    try {
+      let pdfBuffer: Buffer;
+      if (dto.pdfBase64) {
+        pdfBuffer = Buffer.from(dto.pdfBase64, 'base64');
+      } else {
+        pdfBuffer = await this.generateWeeklyConsolidatedPdf({
+          customerId: dto.customerId,
+          startDate: dto.startDate,
+          endDate: dto.endDate,
+          branchId: dto.branchId,
+          customerName: dto.customerName,
+          phone: dto.phone,
+        });
+      }
+
+      const safeCustomerName = customerName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `Consolidado_${safeCustomerName}_${dto.startDate || 'Semanal'}.pdf`;
+      const mediaId = await this.uploadMediaToMeta(pdfBuffer, fileName);
+
+      const token = process.env.WHATSAPP_TOKEN;
+      const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+      const startDateText = dto.startDate || 'Inicio de semana';
+      const endDateText = dto.endDate || 'Fin de semana';
+
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'template',
+        template: {
+          name: process.env.WHATSAPP_WEEKLY_CONSOLIDATED_TEMPLATE || 'envio_consolidado_semanal',
+          language: {
+            code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es_MX',
+          },
+          components: [
+            {
+              type: 'header',
+              parameters: [
+                {
+                  type: 'document',
+                  document: {
+                    id: mediaId,
+                    filename: fileName,
+                  },
+                },
+              ],
+            },
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: customerName },
+                { type: 'text', text: startDateText },
+                { type: 'text', text: endDateText },
+              ],
+            },
+          ],
+        },
+      };
+
+      const response = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Meta Send Message Error (Weekly Consolidated):', errText);
+        throw new InternalServerErrorException(`Fallo al enviar el mensaje de WhatsApp: ${errText}`);
+      }
+
+      return { message: 'Consolidado semanal enviado por WhatsApp exitosamente' };
+    } catch (error) {
+      console.error('Error in sendWeeklyConsolidatedWhatsApp:', error);
+      if (error instanceof BadRequestException || error instanceof InternalServerErrorException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Error al procesar el envío de WhatsApp');
+    }
   }
 }

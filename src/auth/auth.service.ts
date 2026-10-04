@@ -35,7 +35,7 @@ export class AuthService {
     const userRepo = manager ? manager.getRepository(User) : this.userRepository;
     const branchRepo = manager ? manager.getRepository(Branch) : this.branchRepository;
 
-    // 1. Create Permissions from menu
+    // 1. Create Permissions from menu and master list
     const permissionNames = new Set<string>();
     const extractPermissions = (items: any[]) => {
       items.forEach(item => {
@@ -47,10 +47,48 @@ export class AuthService {
     extractPermissions(MENU_ITEMS);
     extractPermissions(RECURRENT_MENU);
     
-    // Add some extra common permissions
-    permissionNames.add('users.manage');
-    permissionNames.add('roles.manage');
-    permissionNames.add('branches.manage');
+    // Master permissions list according to ROLES_Y_SEGURIDAD.md
+    const masterPermissions = [
+      'auth.manage',
+      'admin.view',
+      'users.manage',
+      'roles.manage',
+      'sales.view',
+      'orders.view',
+      'orders.create',
+      'orders.update',
+      'orders.cancel',
+      'customers.view',
+      'customers.create',
+      'customers.manage',
+      'customer-categories.manage',
+      'quotations.view',
+      'quotations.create',
+      'cash.view',
+      'payment-methods.manage',
+      'inventory.view',
+      'inventory.movements',
+      'inventory.transfers',
+      'products.view',
+      'products.manage',
+      'units.manage',
+      'product-categories.manage',
+      'logistics.view',
+      'logistics.trucks',
+      'logistics.trips',
+      'logistics.settlements',
+      'areas.manage',
+      'branches.manage',
+      'purchases.view',
+      'purchases.manage',
+      'suppliers.manage',
+      'production.orders',
+      'production.recipes',
+      'production.decomposition',
+      'production.manage',
+    ];
+
+    masterPermissions.forEach((p) => permissionNames.add(p));
 
     for (const name of permissionNames) {
       const exists = await permissionRepo.findOne({ where: { name } });
@@ -67,74 +105,188 @@ export class AuthService {
       }
     }
 
-    // 2. Create Roles
-    const adminRoleName = 'ADMIN_GLOBAL';
-    let adminRole = await roleRepo.findOne({ where: { name: adminRoleName } });
-    if (!adminRole) {
-      const allPermissions = await permissionRepo.find();
-      adminRole = await roleRepo.save(roleRepo.create({
-        name: adminRoleName,
-        description: 'Administrador con acceso total',
+    // 2. Create Roles with their corresponding functional permissions
+    const rolesConfig = [
+      {
+        name: 'ADMIN_GLOBAL',
+        description: 'SuperAdmin: Acceso absoluto e irrestricto a todos los módulos, reportes y sucursales',
         isSuperAdmin: true,
-        permissions: allPermissions,
-      }));
-    }
-
-    const clerkRoleName = 'CAJERO';
-    let clerkRole = await roleRepo.findOne({ where: { name: clerkRoleName } });
-    if (!clerkRole) {
-      const clerkPermissions = await permissionRepo.find({
-        where: {
-          name: In([
-            'orders.view',      // Ver órdenes de venta
-            'orders.create',    // Venta rápida / Crear orden / POS
-            'customers.view',  // Buscar clientes
-            'customers.create',// Crear clientes nuevos
-            'cash.view',       // Ver arqueos propios
-            'quotations.view', // Ver/Crear cotizaciones
-            'quotations.create'
-          ])
-        }
-      });
-      clerkRole = await roleRepo.save(roleRepo.create({
-        name: clerkRoleName,
-        description: 'Vendedor / Cajero de sucursal',
+        permissionNames: Array.from(permissionNames),
+      },
+      {
+        name: 'CAJERO',
+        description: 'Punto de Venta / Mostrador: Venta Rápida, Órdenes de Venta, Cotizaciones, Clientes, Historial de Cajas y Métodos de Pago',
         isSuperAdmin: false,
-        permissions: clerkPermissions,
-      }));
+        permissionNames: [
+          'sales.view',
+          'orders.view',
+          'orders.create',
+          'orders.update',
+          'customers.view',
+          'customers.create',
+          'customers.manage',
+          'customer-categories.manage',
+          'quotations.view',
+          'quotations.create',
+          'cash.view',
+          'payment-methods.manage',
+        ],
+      },
+      {
+        name: 'ENCARGADO_INVENTARIO',
+        description: 'Bodega y Almacén: Inventarios, Catálogo de Productos, Movimientos de Stock, Traslados entre Sucursales, Compras y Proveedores',
+        isSuperAdmin: false,
+        permissionNames: [
+          'inventory.view',
+          'inventory.movements',
+          'inventory.transfers',
+          'products.view',
+          'products.manage',
+          'units.manage',
+          'product-categories.manage',
+          'purchases.view',
+          'purchases.manage',
+          'suppliers.manage',
+        ],
+      },
+      {
+        name: 'LOGISTICA_Y_DESPACHO',
+        description: 'Logística y Flotilla: Planificación de Viajes, Vehículos/Camiones, Liquidación Diaria de Rutas y Traslados',
+        isSuperAdmin: false,
+        permissionNames: [
+          'logistics.view',
+          'logistics.trucks',
+          'logistics.trips',
+          'logistics.settlements',
+          'orders.view',
+          'inventory.transfers',
+        ],
+      },
+      {
+        name: 'OPERADOR_PRODUCCION',
+        description: 'Planta y Transformación: Órdenes de Manufactura, Despiece (Cortes/Merma), Recetas (BOM) y Áreas de Preparación',
+        isSuperAdmin: false,
+        permissionNames: [
+          'production.orders',
+          'production.recipes',
+          'production.decomposition',
+          'production.manage',
+          'areas.manage',
+          'inventory.view',
+        ],
+      },
+      {
+        name: 'PILOTO_REPARTIDOR',
+        description: 'Entregas en Ruta: Vista exclusiva de sus viajes asignados y confirmación de entregas con PIN',
+        isSuperAdmin: false,
+        permissionNames: [
+          'logistics.view',
+          'logistics.trips',
+        ],
+      },
+    ];
+
+    const savedRoles: Record<string, Role> = {};
+    for (const rCfg of rolesConfig) {
+      let role = await roleRepo.findOne({ where: { name: rCfg.name }, relations: ['permissions'] });
+      const rolePerms = await permissionRepo.find({
+        where: { name: In(rCfg.permissionNames) },
+      });
+
+      if (!role) {
+        role = await roleRepo.save(
+          roleRepo.create({
+            name: rCfg.name,
+            description: rCfg.description,
+            isSuperAdmin: rCfg.isSuperAdmin,
+            permissions: rolePerms,
+          }),
+        );
+      } else {
+        role.permissions = rolePerms;
+        role.isSuperAdmin = rCfg.isSuperAdmin;
+        role.description = rCfg.description;
+        role = await roleRepo.save(role);
+      }
+      savedRoles[rCfg.name] = role;
     }
 
-    // 3. Create Users
-    const adminEmail = 'admin@pos.com';
-    const existsAdmin = await userRepo.findOne({ where: { email: adminEmail } });
-    if (!existsAdmin) {
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      await userRepo.save(userRepo.create({
+    // 3. Create / Update Example Users for Each Role
+    const defaultBranch = await branchRepo.findOne({ where: { deletedAt: IsNull() } });
+
+    const exampleUsers = [
+      {
         name: 'Administrador Global',
-        email: adminEmail,
-        password: hashedPassword,
-        roles: [adminRole!],
-        emailVerified: true,
-      }));
-    }
+        email: 'admin@pos.com',
+        password: 'admin123',
+        roleName: 'ADMIN_GLOBAL',
+        branch: defaultBranch || null,
+      },
+      {
+        name: 'Cajero Principal',
+        email: 'cajero@pos.com',
+        password: 'caja123',
+        roleName: 'CAJERO',
+        branch: defaultBranch || null,
+      },
+      {
+        name: 'Encargado de Bodega',
+        email: 'bodega@pos.com',
+        password: 'bodega123',
+        roleName: 'ENCARGADO_INVENTARIO',
+        branch: defaultBranch || null,
+      },
+      {
+        name: 'Planificador Logística',
+        email: 'logistica@pos.com',
+        password: 'logistica123',
+        roleName: 'LOGISTICA_Y_DESPACHO',
+        branch: defaultBranch || null,
+      },
+      {
+        name: 'Operador de Planta',
+        email: 'produccion@pos.com',
+        password: 'produccion123',
+        roleName: 'OPERADOR_PRODUCCION',
+        branch: defaultBranch || null,
+      },
+      {
+        name: 'Piloto Repartidor',
+        email: 'piloto@pos.com',
+        password: 'piloto123',
+        roleName: 'PILOTO_REPARTIDOR',
+        branch: defaultBranch || null,
+      },
+    ];
 
-    const clerkEmail = 'caja@pos.com';
-    const existsClerk = await userRepo.findOne({ where: { email: clerkEmail } });
-    if (!existsClerk) {
-      const hashedPassword = await bcrypt.hash('caja123', 10);
-      const branch = await branchRepo.findOne({ where: { deletedAt: IsNull() } });
+    for (const u of exampleUsers) {
+      let user = await userRepo.findOne({ where: { email: u.email }, relations: ['roles'] });
+      const role = savedRoles[u.roleName];
+      const hashedPassword = await bcrypt.hash(u.password, 10);
       
-      await userRepo.save(userRepo.create({
-        name: 'Cajero de Prueba',
-        email: clerkEmail,
-        password: hashedPassword,
-        roles: [clerkRole!],
-        branch: branch || null,
-        emailVerified: true,
-      }));
+      if (!user) {
+        if (role) {
+          await userRepo.save(
+            userRepo.create({
+              name: u.name,
+              email: u.email,
+              password: hashedPassword,
+              roles: [role],
+              branch: u.branch,
+              emailVerified: true,
+            }),
+          );
+        }
+      } else {
+        user.name = u.name;
+        user.password = hashedPassword;
+        if (role) user.roles = [role];
+        if (u.branch) user.branch = u.branch;
+        await userRepo.save(user);
+      }
     }
 
-    return { message: 'Sistema inicializado con éxito' };
+    return { message: 'Sistema, roles, permisos y usuarios inicializados con éxito' };
   }
 
   async getDynamicMenu(user: any): Promise<any> {
