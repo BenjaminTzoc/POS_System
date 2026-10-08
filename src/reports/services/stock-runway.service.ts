@@ -46,6 +46,7 @@ export class StockRunwayService {
       .leftJoinAndSelect('product.unit', 'unit')
       .where('inv.deletedAt IS NULL')
       .andWhere('product.isActive = true')
+      .andWhere('product.manageStock = true')
       .andWhere('inv.isAvailable = true');
 
     if (branchId) {
