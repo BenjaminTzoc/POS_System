@@ -218,17 +218,17 @@ export class ConsolidatedReportsService {
   }
 
   async getWeeklyProductConsolidated(weekStartDate: string, branchId?: string): Promise<any> {
-    const start = new Date(weekStartDate);
-    start.setHours(0, 0, 0, 0);
+    const start = new Date(`${weekStartDate}T00:00:00-06:00`);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
     end.setHours(23, 59, 59, 999);
 
-    const query = this.saleDetailRepository.createQueryBuilder('detail').innerJoin('detail.sale', 'sale').innerJoin('detail.product', 'product').select('product.id', 'id').addSelect('product.name', 'name').addSelect('product.sku', 'sku').addSelect('EXTRACT(ISODOW FROM sale.date)', 'dayNumber').addSelect('SUM(detail.lineTotal)', 'total').where('sale.deletedAt IS NULL').andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED }).andWhere('sale.date BETWEEN :start AND :end', { start, end });
+    const isodowExpr = `EXTRACT(ISODOW FROM ((sale.date AT TIME ZONE 'UTC') AT TIME ZONE '${TZ}'))`;
+    const query = this.saleDetailRepository.createQueryBuilder('detail').innerJoin('detail.sale', 'sale').innerJoin('detail.product', 'product').select('product.id', 'id').addSelect('product.name', 'name').addSelect('product.sku', 'sku').addSelect(isodowExpr, 'dayNumber').addSelect('SUM(detail.lineTotal)', 'total').where('sale.deletedAt IS NULL').andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED }).andWhere('sale.date BETWEEN :start AND :end', { start, end });
 
     if (branchId) query.andWhere('sale.branch_id = :branchId', { branchId });
 
-    const results = await query.groupBy('product.id, product.name, product.sku').addGroupBy('EXTRACT(ISODOW FROM sale.date)').getRawMany();
+    const results = await query.groupBy('product.id, product.name, product.sku').addGroupBy(isodowExpr).getRawMany();
 
     const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     const productsMap = new Map();
@@ -255,17 +255,17 @@ export class ConsolidatedReportsService {
   }
 
   async getWeeklyCustomerConsolidated(weekStartDate: string, branchId?: string): Promise<any> {
-    const start = new Date(weekStartDate);
-    start.setHours(0, 0, 0, 0);
+    const start = new Date(`${weekStartDate}T00:00:00-06:00`);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
     end.setHours(23, 59, 59, 999);
 
-    const query = this.saleRepository.createQueryBuilder('sale').leftJoin('sale.customer', 'customer').select("COALESCE(customer.id::text, 'guest')", 'id').addSelect('COALESCE("customer"."name", ("sale"."guestCustomer"->>\'name\'))', 'name').addSelect('EXTRACT(ISODOW FROM sale.date)', 'dayNumber').addSelect('SUM(sale.total)', 'total').where('sale.deletedAt IS NULL').andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED }).andWhere('sale.date BETWEEN :start AND :end', { start, end });
+    const isodowExpr = `EXTRACT(ISODOW FROM ((sale.date AT TIME ZONE 'UTC') AT TIME ZONE '${TZ}'))`;
+    const query = this.saleRepository.createQueryBuilder('sale').leftJoin('sale.customer', 'customer').select("COALESCE(customer.id::text, 'guest')", 'id').addSelect('COALESCE("customer"."name", ("sale"."guestCustomer"->>\'name\'))', 'name').addSelect(isodowExpr, 'dayNumber').addSelect('SUM(sale.total)', 'total').where('sale.deletedAt IS NULL').andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED }).andWhere('sale.date BETWEEN :start AND :end', { start, end });
 
     if (branchId) query.andWhere('sale.branch_id = :branchId', { branchId });
 
-    const results = await query.groupBy("COALESCE(customer.id::text, 'guest')").addGroupBy('COALESCE("customer"."name", ("sale"."guestCustomer"->>\'name\'))').addGroupBy('EXTRACT(ISODOW FROM sale.date)').getRawMany();
+    const results = await query.groupBy("COALESCE(customer.id::text, 'guest')").addGroupBy('COALESCE("customer"."name", ("sale"."guestCustomer"->>\'name\'))').addGroupBy(isodowExpr).getRawMany();
 
     const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     const customersMap = new Map();

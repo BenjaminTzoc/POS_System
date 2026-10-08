@@ -205,16 +205,17 @@ export class CustomerWeeklySummaryService {
   }
 
   private async queryDays(start: Date, end: Date, branchId: string | undefined, params: { cancelled: SaleStatus; pendingStatus: SaleStatus }) {
+    const isodowExpr = `EXTRACT(ISODOW FROM ((sale.date AT TIME ZONE 'UTC') AT TIME ZONE '${TZ}'))`;
     const qb = this.saleRepository
       .createQueryBuilder('sale')
       .leftJoin('sale.customer', 'customer')
       .select(`COALESCE(customer.id::text, '${GUEST_KEY}')`, 'key')
-      .addSelect('EXTRACT(ISODOW FROM sale.date)', 'dayNumber')
+      .addSelect(isodowExpr, 'dayNumber')
       .addSelect(`COALESCE(SUM(CASE WHEN ${COUNTS_AS_SALE} THEN sale.total ELSE 0 END), 0)`, 'total')
       .addSelect(`COALESCE(SUM(CASE WHEN ${COUNTS_AS_SALE} THEN 1 ELSE 0 END), 0)`, 'orderCount');
 
     this.applySaleFilters(qb, start, end, branchId);
-    qb.setParameters(params).groupBy('customer.id').addGroupBy('EXTRACT(ISODOW FROM sale.date)');
+    qb.setParameters(params).groupBy('customer.id').addGroupBy(isodowExpr);
 
     return qb.getRawMany();
   }
