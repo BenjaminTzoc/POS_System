@@ -10,6 +10,10 @@ import { ConsolidatedReportsService } from './consolidated-reports.service';
 import { CustomerWeeklySummaryService } from './customer-weekly-summary.service';
 import { TodayPulseService } from './today-pulse.service';
 import { TodayPaymentsService } from './today-payments.service';
+import { TopProductsSummaryService } from './top-products-summary.service';
+import { TopProductsSummaryQueryDto } from '../dto/top-products-summary.dto';
+import { StockRunwayService } from './stock-runway.service';
+import { StockRunwayQueryDto } from '../dto/stock-runway.dto';
 import { SendWeeklyConsolidatedWhatsAppDto } from '../dto/send-weekly-consolidated-whatsapp.dto';
 
 @Injectable()
@@ -26,6 +30,8 @@ export class ReportsService {
     private readonly customerWeeklySummary: CustomerWeeklySummaryService,
     private readonly todayPulse: TodayPulseService,
     private readonly todayPayments: TodayPaymentsService,
+    private readonly topProductsSummary: TopProductsSummaryService,
+    private readonly stockRunway: StockRunwayService,
   ) {}
 
   async generateWeeklyConsolidatedPdf(params: {
@@ -261,6 +267,16 @@ export class ReportsService {
   // 15. Tendencias mensuales por producto
   getMonthlyProductSalesTrends(month?: number, year?: number, branchId?: string, limit?: number, page?: number) {
     return this.salesReports.getMonthlyProductSalesTrends(month, year, branchId, limit, page);
+  }
+
+  // 16. Resumen de productos más comprados
+  getTopProductsSummary(query: TopProductsSummaryQueryDto) {
+    return this.topProductsSummary.getTopProductsSummary(query);
+  }
+
+  // 17. Monitor de inventario y velocidad de consumo
+  getStockRunway(query: StockRunwayQueryDto) {
+    return this.stockRunway.getStockRunway(query);
   }
 
   async uploadMediaToMeta(pdfBuffer: Buffer, fileName: string): Promise<string> {

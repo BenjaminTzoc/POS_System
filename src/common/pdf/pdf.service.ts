@@ -1552,11 +1552,13 @@ export class PdfService {
 
       currentY = baseLineY + 34;
 
-      // --- 5. Bottom Status Cards (Cobrado / saldo & Crédito) ---
-      const bottomCardWidth = 264;
-      const bottomCardHeight = 56;
+      // --- 5. Bottom Status Cards (Cobrado, Saldo pendiente & Crédito) ---
+      const bottomCardWidth = 172;
+      const bottomCardHeight = 48;
+      const bottomCardGap = 13;
       const bCard1X = 35;
-      const bCard2X = 313;
+      const bCard2X = bCard1X + bottomCardWidth + bottomCardGap;
+      const bCard3X = bCard2X + bottomCardWidth + bottomCardGap;
       const bCardY = currentY;
 
       const paidAmount = Number(data.financial?.paidAmount || 0);
@@ -1565,17 +1567,25 @@ export class PdfService {
       const creditUsed = Number(data.financial?.creditUsed || 0);
       const creditPercent = creditLimit > 0 ? Math.round((creditUsed / creditLimit) * 100) : (creditUsed > 0 ? 100 : 0);
 
-      // Card Izquierda: Cobrado / saldo
+      // Card 1: Cobrado
       doc.roundedRect(bCard1X, bCardY, bottomCardWidth, bottomCardHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
-      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5).text('Cobrado / saldo', bCard1X + 12, bCardY + 8);
-      doc.fillColor('#0D9488').font('Helvetica-Bold').fontSize(10.5).text(`Q${paidAmount.toFixed(2)}`, bCard1X + 12, bCardY + 21);
-      doc.fillColor('#E11D48').font('Helvetica-Bold').fontSize(8.5).text(`Pendiente Q${pendingAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, bCard1X + 12, bCardY + 38);
+      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5).text('Cobrado', bCard1X + 12, bCardY + 8);
+      doc.fillColor('#0D9488').font('Helvetica-Bold').fontSize(10.5).text(`Q${paidAmount.toFixed(2)}`, bCard1X + 12, bCardY + 22);
 
-      // Card Derecha: Crédito
+      // Card 2: Saldo pendiente
       doc.roundedRect(bCard2X, bCardY, bottomCardWidth, bottomCardHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
-      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5).text('Crédito', bCard2X + 12, bCardY + 8);
-      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(10.5).text(`${creditPercent}% usado`, bCard2X + 12, bCardY + 21);
-      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica').fontSize(8.5).text(`Q${creditUsed.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} de Q${creditLimit.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`, bCard2X + 12, bCardY + 38);
+      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5).text('Saldo pendiente', bCard2X + 12, bCardY + 8);
+      doc.fillColor(pendingAmount > 0 ? '#E11D48' : COLOR_TEXT_MUTED).font('Helvetica-Bold').fontSize(10.5).text(`Q${pendingAmount.toFixed(2)}`, bCard2X + 12, bCardY + 22);
+
+      // Card 3: Crédito
+      doc.roundedRect(bCard3X, bCardY, bottomCardWidth, bottomCardHeight, 6).fillAndStroke(COLOR_CARD_BG, COLOR_CARD_BORDER);
+      doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(8.5).text('Crédito', bCard3X + 12, bCardY + 8);
+      if (creditLimit > 0) {
+        doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(10.5).text(`${creditPercent}% usado`, bCard3X + 12, bCardY + 22);
+        doc.fillColor(COLOR_TEXT_MUTED).font('Helvetica').fontSize(7.5).text(`Q${creditUsed.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} / Q${creditLimit.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, bCard3X + 12, bCardY + 36);
+      } else {
+        doc.fillColor(COLOR_TEXT_DARK).font('Helvetica-Bold').fontSize(10.5).text('Sin línea', bCard3X + 12, bCardY + 22);
+      }
 
       currentY = bCardY + bottomCardHeight + 14;
 

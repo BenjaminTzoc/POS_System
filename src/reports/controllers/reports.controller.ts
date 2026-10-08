@@ -9,6 +9,8 @@ import { CustomerWeeklySummaryQueryDto } from '../dto/customer-weekly-summary.dt
 import { TodayPulseQueryDto } from '../dto/today-pulse.dto';
 import { DashboardCalendarQueryDto } from '../dto/dashboard-calendar.dto';
 import { TodayPaymentsQueryDto } from '../dto/today-payments.dto';
+import { TopProductsSummaryQueryDto } from '../dto/top-products-summary.dto';
+import { StockRunwayQueryDto } from '../dto/stock-runway.dto';
 import { PdfService } from '../../common/pdf/pdf.service';
 import { SendWeeklyConsolidatedWhatsAppDto } from '../dto/send-weekly-consolidated-whatsapp.dto';
 
@@ -197,5 +199,23 @@ export class ReportsController {
     const p = page ? parseInt(page, 10) : 1;
 
     return this.reportsService.getMonthlyProductSalesTrends(m, y, branchId, l, p);
+  }
+
+  @Get('products/top-summary')
+  async getTopProductsSummary(@User() user: any, @Query() query: TopProductsSummaryQueryDto) {
+    const branchId = isSuperAdmin(user) ? query.branchId : user.branch?.id;
+    return this.reportsService.getTopProductsSummary({
+      ...query,
+      branchId,
+    });
+  }
+
+  @Get('inventory/stock-runway')
+  async getStockRunway(@User() user: any, @Query() query: StockRunwayQueryDto) {
+    const branchId = isSuperAdmin(user) ? query.branchId : user.branch?.id;
+    return this.reportsService.getStockRunway({
+      ...query,
+      branchId,
+    });
   }
 }
