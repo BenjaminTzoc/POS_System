@@ -68,6 +68,13 @@ export class SaleController {
     return this.saleService.confirmSale(id, undefined, userId);
   }
 
+  @Post(':id/reopen')
+  @Permissions('orders.update')
+  @HttpCode(HttpStatus.OK)
+  reopenSale(@Param('id', ParseUUIDPipe) id: string, @Req() req): Promise<SaleResponseDto> {
+    return this.saleService.reopenSale(id, req.user?.id);
+  }
+
   @Post(':id/deliver')
   @HttpCode(HttpStatus.OK)
   deliverSale(@Param('id', ParseUUIDPipe) id: string): Promise<SaleResponseDto> {

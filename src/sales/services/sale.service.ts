@@ -6,7 +6,7 @@ import { CustomerService, DiscountCodeService, CustomerProductPriceService } fro
 import { BranchService, InventoryMovementService, ProductService } from 'src/logistics/services';
 import { CreateSaleDto, PaginatedSaleResponseDto, QuickSaleDto, SaleFilterDto, SaleResponseDto, UpdateSaleDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
-import { Branch, Inventory, MovementStatus, MovementType, MovementConcept, Area } from 'src/logistics/entities';
+import { Branch, Inventory, MovementStatus, MovementType, MovementConcept, Area, TripItem, TripStatus } from 'src/logistics/entities';
 import { SaleGateway } from '../gateway/sale.gateway';
 import { SaleDiscount } from '../entities/sale-discount.entity';
 import { MailService } from 'src/common/mail/mail.service';
@@ -943,6 +943,100 @@ export class SaleService {
         await this.discountCodeService.applyDiscountCode(sale.discountCode.code, sale.id);
       }
 
+      await queryRunner.commitTransaction();
+      return this.findOne(id);
+    } catch (error) {
+      if (queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async reopenSale(id: string, userId?: string): Promise<SaleResponseDto> {
+    const sale = await this.saleRepository.findOne({
+      where: { id, deletedAt: IsNull() },
+      relations: ['details', 'details.product', 'customer', 'branch', 'discountCode', 'payments'],
+    });
+
+    if (!sale) {
+      throw new NotFoundException(`Venta con ID ${id} no encontrada`);
+    }
+
+    if (sale.status !== SaleStatus.CONFIRMED) {
+      throw new BadRequestException('Solo se pueden reabrir órdenes confirmadas que aún no entraron a preparación o entrega');
+    }
+
+    const completedPayments = (sale.payments || []).filter(
+      (payment) => !payment.deletedAt && payment.status === PaymentStatus.COMPLETED && Number(payment.amount) > 0,
+    );
+    if (Number(sale.paidAmount || 0) > 0 || completedPayments.length > 0) {
+      throw new BadRequestException('No se puede reabrir una orden que ya tiene pagos registrados');
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const assignedTrip = await queryRunner.manager
+        .createQueryBuilder(TripItem, 'item')
+        .innerJoin('item.trip', 'trip')
+        .where('item.sale_id = :saleId', { saleId: sale.id })
+        .andWhere('item.deletedAt IS NULL')
+        .andWhere('trip.deletedAt IS NULL')
+        .andWhere('trip.status != :cancelled', { cancelled: TripStatus.CANCELLED })
+        .getOne();
+
+      if (assignedTrip) {
+        throw new BadRequestException('No se puede reabrir una orden asignada a un viaje');
+      }
+
+      for (const detail of sale.details) {
+        if (!detail.product?.manageStock || detail.deletedAt) continue;
+
+        await this.inventoryMovementService.create(
+          {
+            productId: detail.product.id,
+            branchId: sale.branch.id,
+            quantity: detail.quantity,
+            type: MovementType.IN,
+            notes: `Reapertura de venta ${sale.invoiceNumber}`,
+            unitCost: detail.product.cost,
+            totalCost: Number(detail.quantity) * Number(detail.product.cost),
+            status: MovementStatus.COMPLETED,
+            referenceId: sale.id,
+            referenceNumber: sale.invoiceNumber,
+            concept: MovementConcept.RETURN,
+          },
+          userId,
+          true,
+          queryRunner.manager,
+        );
+
+        if (!sale.isPreorder) {
+          await queryRunner.manager.increment(
+            Inventory,
+            {
+              product: { id: detail.product.id },
+              branch: { id: sale.branch.id },
+              deletedAt: IsNull(),
+            },
+            'reservedStock',
+            detail.quantity,
+          );
+        }
+      }
+
+      if (sale.customer) {
+        await this.customerService.updatePurchaseStats(sale.customer.id, -Number(sale.total));
+      }
+
+      if (sale.discountCode) {
+        await this.discountCodeService.revertDiscountCodeUsage(sale.discountCode.code);
+      }
+
+      await queryRunner.manager.update(Sale, { id: sale.id }, { status: SaleStatus.PENDING });
       await queryRunner.commitTransaction();
       return this.findOne(id);
     } catch (error) {
