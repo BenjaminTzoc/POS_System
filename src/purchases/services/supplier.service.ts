@@ -105,27 +105,15 @@ export class SupplierService {
       throw new ConflictException('No se puede eliminar el proveedor porque tiene compras asociadas');
     }
 
-    await this.supplierRepository.softRemove(supplier);
+    try {
+      await this.supplierRepository.delete(supplier.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar el proveedor porque está siendo usado');
+      }
+      throw error;
+    }
     return { message: 'Proveedor eliminado exitosamente' };
-  }
-
-  async restore(id: string): Promise<SupplierResponseDto> {
-    const supplier = await this.supplierRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
-
-    if (!supplier) {
-      throw new NotFoundException(`Proveedor con ID ${id} no encontrado`);
-    }
-
-    if (!supplier.deletedAt) {
-      throw new ConflictException(`El proveedor con ID ${id} no está eliminado`);
-    }
-
-    supplier.deletedAt = null;
-    const restoredSupplier = await this.supplierRepository.save(supplier);
-    return plainToInstance(SupplierResponseDto, restoredSupplier);
   }
 
   async searchSuppliers(query: string, includeDeleted: boolean = false): Promise<SupplierResponseDto[]> {

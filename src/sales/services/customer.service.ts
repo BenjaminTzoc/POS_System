@@ -210,28 +210,15 @@ export class CustomerService {
       throw new ConflictException('No se puede eliminar el cliente porque tiene ventas asociadas');
     }
 
-    await this.customerRepository.softRemove(customer);
+    try {
+      await this.customerRepository.delete(customer.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar el cliente porque está siendo usado');
+      }
+      throw error;
+    }
     return { message: 'Cliente eliminado exitosamente' };
-  }
-
-  async restore(id: string): Promise<CustomerResponseDto> {
-    const customer = await this.customerRepository.findOne({
-      where: { id },
-      withDeleted: true,
-      relations: ['category'],
-    });
-
-    if (!customer) {
-      throw new NotFoundException(`Cliente con ID ${id} no encontrado`);
-    }
-
-    if (!customer.deletedAt) {
-      throw new ConflictException(`El cliente con ID ${id} no está eliminado`);
-    }
-
-    customer.deletedAt = null;
-    const restoredCustomer = await this.customerRepository.save(customer);
-    return plainToInstance(CustomerResponseDto, restoredCustomer);
   }
 
   async searchCustomers(query: string, includeDeleted: boolean = false): Promise<CustomerResponseDto[]> {

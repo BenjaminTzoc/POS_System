@@ -15,13 +15,13 @@ export class AreaController {
 
   @Get()
   findAll(@Query('includeDeleted') includeDeleted?: string) {
-    const showDeleted = includeDeleted === 'true';
+    const showDeleted = false;
     return this.areaService.findAll(showDeleted);
   }
 
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted?: string) {
-    const showDeleted = includeDeleted === 'true';
+    const showDeleted = false;
     return this.areaService.findOne(id, showDeleted);
   }
 
@@ -35,8 +35,4 @@ export class AreaController {
     return this.areaService.remove(id);
   }
 
-  @Patch(':id/restore')
-  restore(@Param('id', ParseUUIDPipe) id: string) {
-    return this.areaService.restore(id);
-  }
 }

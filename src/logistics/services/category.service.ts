@@ -126,27 +126,14 @@ export class CategoryService {
       throw new ConflictException('No se puede eliminar la categoría porque tiene productos asociados');
     }
 
-    await this.categoryRepository.softRemove(category);
+    try {
+      await this.categoryRepository.delete(category.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar la categoría porque está siendo usada');
+      }
+      throw error;
+    }
     return { message: 'Categoría eliminada exitosamente' };
-  }
-
-  async restore(id: string): Promise<CategoryResponseDto> {
-    const category = await this.categoryRepository.findOne({
-      where: { id },
-      withDeleted: true,
-      relations: ['defaultUnit'],
-    });
-
-    if (!category) {
-      throw new NotFoundException(`Categoría con ID ${id} no encontrada`);
-    }
-
-    if (!category.deletedAt) {
-      throw new ConflictException(`La categoría con ID ${id} no está eliminada`);
-    }
-
-    category.deletedAt = null;
-    const restoredCategory = await this.categoryRepository.save(category);
-    return plainToInstance(CategoryResponseDto, restoredCategory);
   }
 }

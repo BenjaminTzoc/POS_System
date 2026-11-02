@@ -40,9 +40,4 @@ export class PermissionsController {
     return this.authService.removePermission(id);
   }
 
-  @Patch(':id/restore')
-  @HttpCode(HttpStatus.OK)
-  restorePermission(@Param('id', ParseUUIDPipe) id: string): Promise<PermissionResponseDto> {
-    return this.authService.restorePermission(id);
-  }
 }

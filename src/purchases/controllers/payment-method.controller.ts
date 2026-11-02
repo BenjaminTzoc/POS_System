@@ -17,7 +17,7 @@ export class PaymentMethodController {
   @Get()
   @Public()
   findAll(@Query('includeDeleted') includeDeleted: string): Promise<PaymentMethodResponseDto[]> {
-    return this.paymentMethodService.findAll(includeDeleted === 'true');
+    return this.paymentMethodService.findAll(false);
   }
 
   @Get('code/:code')
@@ -45,10 +45,4 @@ export class PaymentMethodController {
     return this.paymentMethodService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<PaymentMethodResponseDto> {
-    return this.paymentMethodService.restore(id);
-  }
 }

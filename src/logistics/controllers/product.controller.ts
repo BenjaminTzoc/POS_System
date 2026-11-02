@@ -68,7 +68,7 @@ export class ProductController {
     @Query('search') search?: string,
   ): Promise<ProductResponseDto[] | MinimalProductResponseDto[] | PaginatedProductResponseDto> {
     const user = req.user;
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     const branchId = branchIdParam || user.branch?.id;
 
     if (!isSuperAdmin(user) && !branchId) {
@@ -122,7 +122,7 @@ export class ProductController {
     @Req() req
   ): Promise<ProductResponseDto[] | MinimalProductResponseDto[]> {
     const user = req.user;
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
 
     const branchId = branchIdParam || user.branch?.id;
 
@@ -188,7 +188,7 @@ export class ProductController {
   @Permissions('products.manage')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @Req() req): Promise<ProductResponseDto> {
     const user = req.user;
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
 
     const branchId = isSuperAdmin(user) ? undefined : user.branch?.id;
 
@@ -239,10 +239,4 @@ export class ProductController {
     return this.productService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<ProductResponseDto> {
-    return this.productService.restore(id);
-  }
 }

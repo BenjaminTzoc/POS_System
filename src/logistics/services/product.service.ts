@@ -690,28 +690,15 @@ export class ProductService {
       throw new ConflictException('No se puede eliminar el producto porque tiene inventarios asociados');
     }
 
-    await this.productRepository.softRemove(product);
+    try {
+      await this.productRepository.delete(product.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar el producto porque está siendo usado');
+      }
+      throw error;
+    }
     return { message: 'Producto eliminado exitosamente' };
-  }
-
-  async restore(id: string): Promise<ProductResponseDto> {
-    const product = await this.productRepository.findOne({
-      where: { id },
-      withDeleted: true,
-      relations: ['category', 'unit', 'category.defaultUnit'],
-    });
-
-    if (!product) {
-      throw new NotFoundException(`Producto con ID ${id} no encontrado`);
-    }
-
-    if (!product.deletedAt) {
-      throw new ConflictException(`El producto con ID ${id} no está eliminado`);
-    }
-
-    product.deletedAt = null;
-    const restoredProduct = await this.productRepository.save(product);
-    return plainToInstance(ProductResponseDto, restoredProduct);
   }
 
   async searchProducts(

@@ -50,12 +50,6 @@ export class UsersController {
     return this.authService.removeUser(id);
   }
 
-  @Patch(':id/restore')
-  @HttpCode(HttpStatus.OK)
-  restoreUser(@Param('id', ParseUUIDPipe) id: string): Promise<UserResponseDto> {
-    return this.authService.restoreUser(id);
-  }
-
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)

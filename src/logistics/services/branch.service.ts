@@ -126,27 +126,15 @@ export class BranchService {
       throw new ConflictException('No se puede eliminar la sucursal porque tiene transferencias asociadas');
     }
 
-    await this.branchRepository.softRemove(branch);
+    try {
+      await this.branchRepository.delete(branch.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar la sucursal porque está siendo usada');
+      }
+      throw error;
+    }
     return { message: 'Sucursal eliminada exitosamente' };
-  }
-
-  async restore(id: string): Promise<BranchResponseDto> {
-    const branch = await this.branchRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
-
-    if (!branch) {
-      throw new NotFoundException(`Sucursal con ID ${id} no encontrada`);
-    }
-
-    if (!branch.deletedAt) {
-      throw new ConflictException(`La sucursal con ID ${id} no está eliminada`);
-    }
-
-    branch.deletedAt = null;
-    const restoredBranch = await this.branchRepository.save(branch);
-    return plainToInstance(BranchResponseDto, restoredBranch);
   }
 
   async searchBranches(query: string, includeDeleted: boolean = false, isPlant?: boolean, minimal: boolean = false): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {

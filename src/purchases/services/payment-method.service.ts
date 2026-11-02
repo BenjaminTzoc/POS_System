@@ -117,26 +117,14 @@ export class PaymentMethodService {
       throw new ConflictException('No se puede eliminar el método de pago porque tiene pagos asociados');
     }
 
-    await this.paymentMethodRepository.softRemove(paymentMethod);
+    try {
+      await this.paymentMethodRepository.delete(paymentMethod.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar el método de pago porque está siendo usado');
+      }
+      throw error;
+    }
     return { message: 'Método de pago eliminado exitosamente' };
-  }
-
-  async restore(id: string): Promise<PaymentMethodResponseDto> {
-    const paymentMethod = await this.paymentMethodRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
-
-    if (!paymentMethod) {
-      throw new NotFoundException(`Método de pago con ID ${id} no encontrado`);
-    }
-
-    if (!paymentMethod.deletedAt) {
-      throw new ConflictException(`El método de pago con ID ${id} no está eliminado`);
-    }
-
-    paymentMethod.deletedAt = null;
-    const restoredPaymentMethod = await this.paymentMethodRepository.save(paymentMethod);
-    return plainToInstance(PaymentMethodResponseDto, restoredPaymentMethod);
   }
 }

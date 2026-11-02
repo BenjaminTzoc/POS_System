@@ -43,9 +43,4 @@ export class RolesController {
     return this.authService.removeRole(id);
   }
 
-  @Patch(':id/restore')
-  @HttpCode(HttpStatus.OK)
-  restoreRole(@Param('id', ParseUUIDPipe) id: string): Promise<RoleResponseDto> {
-    return this.authService.restoreRole(id);
-  }
 }

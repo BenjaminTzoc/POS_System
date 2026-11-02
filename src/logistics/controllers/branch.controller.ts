@@ -23,7 +23,7 @@ export class BranchController {
     @Query('minimal') minimal: string,
     @User() user: any,
   ): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     const filterIsPlant = isPlant === 'true' ? true : isPlant === 'false' ? false : undefined;
     const isMinimal = minimal === 'true';
     return this.branchService.findAll(showDeleted, filterIsPlant, isMinimal);
@@ -37,7 +37,7 @@ export class BranchController {
     @Query('minimal') minimal: string,
     @User() user: any,
   ): Promise<BranchResponseDto[] | MinimalBranchResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     const filterIsPlant = isPlant === 'true' ? true : isPlant === 'false' ? false : undefined;
     const isMinimal = minimal === 'true';
     return this.branchService.searchBranches(query, showDeleted, filterIsPlant, isMinimal);
@@ -50,7 +50,7 @@ export class BranchController {
 
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<BranchResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.branchService.findOne(id, showDeleted);
   }
 
@@ -67,10 +67,4 @@ export class BranchController {
     return this.branchService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Permissions('branches.manage')
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<BranchResponseDto> {
-    return this.branchService.restore(id);
-  }
 }

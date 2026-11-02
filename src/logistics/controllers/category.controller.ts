@@ -18,13 +18,13 @@ export class CategoryController {
 
   @Get()
   findAll(@Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<CategoryResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.categoryService.findAll(showDeleted);
   }
 
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<CategoryResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.categoryService.findOne(id, showDeleted);
   }
 
@@ -41,10 +41,4 @@ export class CategoryController {
     return this.categoryService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Permissions('categories.manage')
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<CategoryResponseDto> {
-    return this.categoryService.restore(id);
-  }
 }

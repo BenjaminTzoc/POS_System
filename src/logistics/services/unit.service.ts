@@ -19,9 +19,6 @@ export class UnitService {
     });
 
     if (existingUnit) {
-      if (existingUnit.deletedAt) {
-        throw new ConflictException(`La unidad '${dto.name}' ya existe pero está inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`);
-      }
       throw new ConflictException(`La unidad '${dto.name}' ya existe`);
     }
 
@@ -31,9 +28,6 @@ export class UnitService {
     });
 
     if (existingAbbreviation) {
-      if (existingAbbreviation.deletedAt) {
-        throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya existe en una unidad inactiva. Considere reactivarla o contacte con el administrador de su sucursal.`);
-      }
       throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya está en uso`);
     }
 
@@ -42,18 +36,16 @@ export class UnitService {
     return plainToInstance(UnitResponseDto, savedUnit);
   }
 
-  async findAll(includeDeleted: boolean = false): Promise<UnitResponseDto[]> {
+  async findAll(): Promise<UnitResponseDto[]> {
     const units = await this.unitRepository.find({
-      withDeleted: includeDeleted,
       order: { name: 'ASC' },
     });
     return plainToInstance(UnitResponseDto, units);
   }
 
-  async findOne(id: string, includeDeleted: boolean = false): Promise<UnitResponseDto> {
+  async findOne(id: string): Promise<UnitResponseDto> {
     const unit = await this.unitRepository.findOne({
       where: { id },
-      withDeleted: includeDeleted,
     });
 
     if (!unit) {
@@ -79,9 +71,6 @@ export class UnitService {
       });
 
       if (existingUnit) {
-        if (existingUnit.deletedAt) {
-          throw new ConflictException(`No se puede usar el nombre '${dto.name}' porque pertenece a una unidad inactiva. Considere reactivarla o contacte con el administrador.`);
-        }
         throw new ConflictException(`La unidad '${dto.name}' ya existe`);
       }
     }
@@ -93,9 +82,6 @@ export class UnitService {
       });
 
       if (existingAbbreviation) {
-        if (existingAbbreviation.deletedAt) {
-          throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya pertenece a una unidad inactiva.`);
-        }
         throw new ConflictException(`La abreviatura '${dto.abbreviation}' ya está en uso`);
       }
     }
@@ -114,38 +100,26 @@ export class UnitService {
       throw new NotFoundException(`Unidad con ID ${id} no encontrada`);
     }
 
-    const categoriesCount = await this.unitRepository.createQueryBuilder('unit').innerJoin('unit.categories', 'category').where('unit.id = :id', { id }).andWhere('category.deletedAt IS NULL').getCount();
+    const categoriesCount = await this.unitRepository.createQueryBuilder('unit').innerJoin('unit.categories', 'category').where('unit.id = :id', { id }).getCount();
 
     if (categoriesCount > 0) {
       throw new ConflictException('No se puede eliminar la unidad porque está siendo usada en categorías');
     }
 
-    const productsCount = await this.unitRepository.createQueryBuilder('unit').innerJoin('unit.products', 'product').where('unit.id = :id', { id }).andWhere('product.deletedAt IS NULL').getCount();
+    const productsCount = await this.unitRepository.createQueryBuilder('unit').innerJoin('unit.products', 'product').where('unit.id = :id', { id }).getCount();
 
     if (productsCount > 0) {
       throw new ConflictException('No se puede eliminar la unidad porque está siendo usada en productos');
     }
 
-    await this.unitRepository.softRemove(unit);
+    try {
+      await this.unitRepository.delete(unit.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar la unidad porque está siendo usada');
+      }
+      throw error;
+    }
     return { message: 'Unidad eliminada exitosamente' };
-  }
-
-  async restore(id: string): Promise<UnitResponseDto> {
-    const unit = await this.unitRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
-
-    if (!unit) {
-      throw new NotFoundException(`Unidad con ID ${id} no encontrada`);
-    }
-
-    if (!unit.deletedAt) {
-      throw new ConflictException(`La unidad con ID ${id} no está eliminada`);
-    }
-
-    unit.deletedAt = null;
-    const restoredUnit = await this.unitRepository.save(unit);
-    return plainToInstance(UnitResponseDto, restoredUnit);
   }
 }

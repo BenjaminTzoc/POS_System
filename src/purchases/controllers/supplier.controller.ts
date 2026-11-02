@@ -18,13 +18,13 @@ export class SupplierController {
 
   @Get()
   findAll(@Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<SupplierResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.supplierService.findAll(showDeleted);
   }
 
   @Get('search')
   search(@Query('q') query: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<SupplierResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.supplierService.searchSuppliers(query, showDeleted);
   }
 
@@ -40,7 +40,7 @@ export class SupplierController {
 
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<SupplierResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.supplierService.findOne(id, showDeleted);
   }
 
@@ -57,10 +57,4 @@ export class SupplierController {
     return this.supplierService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Permissions('suppliers.manage')
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<SupplierResponseDto> {
-    return this.supplierService.restore(id);
-  }
 }

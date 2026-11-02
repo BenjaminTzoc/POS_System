@@ -54,27 +54,15 @@ export class AreaService {
 
   async remove(id: string): Promise<{ message: string }> {
     const area = await this.findOne(id);
-    await this.areaRepository.softRemove(area as any);
+    try {
+      await this.areaRepository.delete(id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar el área porque está siendo usada');
+      }
+      throw error;
+    }
     return { message: 'Área eliminada exitosamente' };
-  }
-
-  async restore(id: string): Promise<AreaResponseDto> {
-    const area = await this.areaRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
-
-    if (!area) {
-      throw new NotFoundException(`Área con ID ${id} no encontrada`);
-    }
-
-    if (!area.deletedAt) {
-      throw new ConflictException(`El área con ID ${id} no está eliminada`);
-    }
-
-    area.deletedAt = null;
-    const restoredArea = await this.areaRepository.save(area);
-    return plainToInstance(AreaResponseDto, restoredArea);
   }
 
   async findNextArea(currentAreaId: string): Promise<Area | null> {

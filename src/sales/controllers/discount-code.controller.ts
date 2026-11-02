@@ -85,10 +85,4 @@ export class DiscountCodeController {
     return this.discountCodeService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<DiscountCodeResponseDto> {
-    return this.discountCodeService.restore(id);
-  }
 }

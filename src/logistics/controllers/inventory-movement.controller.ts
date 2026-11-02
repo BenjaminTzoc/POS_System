@@ -110,10 +110,4 @@ export class InventoryMovementController {
     return this.movementService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryMovementResponseDto> {
-    return this.movementService.restore(id);
-  }
 }

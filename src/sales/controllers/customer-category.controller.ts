@@ -18,19 +18,19 @@ export class CustomerCategoryController {
 
   @Get()
   findAll(@Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<CustomerCategoryResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.customerCategoryService.findAll(showDeleted);
   }
 
   @Get('name/:name')
   findByName(@Param('name') name: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<CustomerCategoryResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.customerCategoryService.findByName(name, showDeleted);
   }
 
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string, @User() user: any): Promise<CustomerCategoryResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.customerCategoryService.findOne(id, showDeleted);
   }
 
@@ -47,10 +47,4 @@ export class CustomerCategoryController {
     return this.customerCategoryService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Permissions('customer-categories.manage')
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<CustomerCategoryResponseDto> {
-    return this.customerCategoryService.restore(id);
-  }
 }

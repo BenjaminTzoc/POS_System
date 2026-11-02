@@ -108,27 +108,15 @@ export class CustomerCategoryService {
       throw new ConflictException('No se puede eliminar la categoría porque tiene clientes asociados');
     }
 
-    await this.customerCategoryRepository.softRemove(category);
+    try {
+      await this.customerCategoryRepository.delete(category.id);
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23503') {
+        throw new ConflictException('No se puede eliminar la categoría porque está siendo usada');
+      }
+      throw error;
+    }
     return { message: 'Categoría de cliente eliminada exitosamente' };
-  }
-
-  async restore(id: string): Promise<CustomerCategoryResponseDto> {
-    const category = await this.customerCategoryRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
-
-    if (!category) {
-      throw new NotFoundException(`Categoría de cliente con ID ${id} no encontrada`);
-    }
-
-    if (!category.deletedAt) {
-      throw new ConflictException(`La categoría de cliente con ID ${id} no está eliminada`);
-    }
-
-    category.deletedAt = null;
-    const restoredCategory = await this.customerCategoryRepository.save(category);
-    return plainToInstance(CustomerCategoryResponseDto, restoredCategory);
   }
 
   async findCategoryByPurchaseAmount(purchaseAmount: number): Promise<CustomerCategoryResponseDto | null> {

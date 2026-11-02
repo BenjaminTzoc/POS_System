@@ -31,14 +31,14 @@ export class CustomerController {
   @Get()
   @Permissions('customers.view')
   findAll(@Req() req, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
+    const showDeleted = false;
     return this.customerService.findAll(showDeleted);
   }
 
   @Get('search')
   @Permissions('customers.view')
   search(@Req() req, @Query('q') query: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
+    const showDeleted = false;
     return this.customerService.searchCustomers(query, showDeleted);
   }
 
@@ -63,14 +63,14 @@ export class CustomerController {
   @Get('category/:categoryId')
   @Permissions('customers.view')
   findByCategory(@Req() req, @Param('categoryId', ParseUUIDPipe) categoryId: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
+    const showDeleted = false;
     return this.customerService.findByCategory(categoryId, showDeleted);
   }
 
   @Get('nit/:nit')
   @Permissions('customers.view')
   findByNit(@Req() req, @Param('nit') nit: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
+    const showDeleted = false;
     return this.customerService.findByNit(nit, showDeleted);
   }
 
@@ -124,7 +124,7 @@ export class CustomerController {
   @Get(':id')
   @Permissions('customers.view')
   findOne(@Req() req, @Param('id', ParseUUIDPipe) id: string, @Query('includeDeleted') includeDeleted: string): Promise<CustomerResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(req.user);
+    const showDeleted = false;
     return this.customerService.findOne(id, showDeleted);
   }
 
@@ -155,9 +155,4 @@ export class CustomerController {
     return this.customerService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @Permissions('customers.manage')
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<CustomerResponseDto> {
-    return this.customerService.restore(id);
-  }
 }

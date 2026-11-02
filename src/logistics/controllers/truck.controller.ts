@@ -25,7 +25,7 @@ export class TruckController {
     @Query('status') status: TruckStatus,
     @User() user: any,
   ): Promise<TruckResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.truckService.findAll(showDeleted, status);
   }
 
@@ -35,7 +35,7 @@ export class TruckController {
     @Query('includeDeleted') includeDeleted: string,
     @User() user: any,
   ): Promise<TruckResponseDto[]> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.truckService.search(query, showDeleted);
   }
 
@@ -50,7 +50,7 @@ export class TruckController {
     @Query('includeDeleted') includeDeleted: string,
     @User() user: any,
   ): Promise<TruckResponseDto> {
-    const showDeleted = includeDeleted === 'true' && isSuperAdmin(user);
+    const showDeleted = false;
     return this.truckService.findOne(id, showDeleted);
   }
 
@@ -68,9 +68,4 @@ export class TruckController {
     return this.truckService.remove(id);
   }
 
-  @Patch(':id/restore')
-  @HttpCode(HttpStatus.OK)
-  restore(@Param('id', ParseUUIDPipe) id: string): Promise<TruckResponseDto> {
-    return this.truckService.restore(id);
-  }
 }
