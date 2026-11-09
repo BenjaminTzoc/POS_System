@@ -1,5 +1,6 @@
 export { CustomerCategory } from './customer-category.entity';
 export { Customer } from './customer.entity';
+export { CustomerCreditMovement, CustomerCreditMovementType } from './customer-credit-movement.entity';
 export { CustomerProductPrice } from './customer-product-price.entity';
 export { DiscountCode, DiscountScope, DiscountType } from './discount-code.entity';
 export { SaleDetail } from './sale-detail.entity';

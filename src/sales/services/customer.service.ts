@@ -73,6 +73,7 @@ export class CustomerService {
       birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
       loyaltyPoints: dto.loyaltyPoints || 0,
       creditLimit: dto.creditLimit ?? (category?.defaultCreditLimit || 0),
+      creditBalance: 0,
       category: category,
     });
 

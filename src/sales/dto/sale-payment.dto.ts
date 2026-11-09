@@ -28,8 +28,13 @@ export class CreateSalePaymentDto {
 
   @IsNotEmpty()
   @IsNumber()
-  @Min(0.01)
+  @Min(0)
   amount: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  applyCredit?: number;
 
   @IsNotEmpty()
   @IsDateString()

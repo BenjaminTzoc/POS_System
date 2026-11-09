@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Sale, SaleDetail, SaleStatus, DiscountType, SalePayment, PaymentStatus } from '../entities';
+import { settleTenderedPayments } from './customer-credit.util';
 import { DataSource, DeepPartial, IsNull, Like, Repository } from 'typeorm';
 import { CustomerService, DiscountCodeService, CustomerProductPriceService } from '.';
 import { BranchService, InventoryMovementService, ProductService } from 'src/logistics/services';
@@ -97,6 +98,7 @@ export class SaleService {
     }
 
     if (!dto.details?.length) throw new BadRequestException('La venta debe tener al menos un detalle');
+    await this.bindGenericLines(dto.details);
 
     const isPreorder = !!dto.isPreorder;
     if (isPreorder && !dto.promisedDeliveryDate) {
@@ -115,13 +117,14 @@ export class SaleService {
           'product.id',
           'product.name',
           'product.manageStock',
+          'product.isGeneric',
           'COALESCE(SUM(inventory.stock), 0) AS current_stock',
           'COALESCE(SUM(inventory.reserved_stock), 0) AS reserved_stock',
           'COALESCE(bool_and(inventory.is_available), true) AS is_available',
         ])
         .from('products', 'product')
         .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId })
-        .where('product.id = :productId', { productId: detailDto.productId })
+        .where('product.id = :productId', { productId: this.lineProductId(detailDto) })
         .andWhere('product.deletedAt IS NULL')
         .groupBy('product.id')
         .getRawOne();
@@ -220,7 +223,7 @@ export class SaleService {
 
       const customPrices = await this.customerProductPriceService.getActivePriceMap(
         dto.customerId,
-        dto.details.map((d) => d.productId),
+        dto.details.map((d) => this.lineProductId(d)),
       );
 
       let subtotal = 0;
@@ -228,8 +231,9 @@ export class SaleService {
       let lineDiscounts = 0;
 
       for (const detailDto of dto.details) {
-        const product = await this.productService.findOne(detailDto.productId);
-        const unitPrice = customPrices.get(detailDto.productId) ?? Number(detailDto.unitPrice);
+        const productId = this.lineProductId(detailDto);
+        const product = await this.productService.findOne(productId);
+        const unitPrice = this.resolveLineUnitPrice(product, detailDto, customPrices);
 
         const lineSubtotal = detailDto.quantity * unitPrice;
 
@@ -249,7 +253,7 @@ export class SaleService {
 
         const detail = qr.manager.create(SaleDetail, {
           sale: savedSale,
-          product: { id: detailDto.productId },
+          product: { id: productId },
           quantity: detailDto.quantity,
           unitPrice,
           discount: discountPct,
@@ -393,6 +397,7 @@ export class SaleService {
     const deliveryAddress = this.resolveDeliveryAddress(dto.deliveryAddress, customer, dto.guestCustomer);
 
     // 1. Stock Check
+    await this.bindGenericLines(dto.details);
     const stockErrors: string[] = [];
     for (const detailDto of dto.details) {
       const stockQuery = await this.dataSource
@@ -401,12 +406,13 @@ export class SaleService {
           'product.id',
           'product.name',
           'product.manageStock',
+          'product.isGeneric',
           'COALESCE(SUM(inventory.stock), 0) AS current_stock',
           'COALESCE(bool_and(inventory.is_available), true) AS is_available',
         ])
         .from('products', 'product')
         .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId: dto.branchId })
-        .where('product.id = :productId', { productId: detailDto.productId })
+        .where('product.id = :productId', { productId: this.lineProductId(detailDto) })
         .andWhere('product.deletedAt IS NULL')
         .groupBy('product.id')
         .getRawOne();
@@ -472,15 +478,16 @@ export class SaleService {
       // 3. Create Details and calculate totals
       const customPrices = await this.customerProductPriceService.getActivePriceMap(
         dto.customerId,
-        dto.details.map((d) => d.productId),
+        dto.details.map((d) => this.lineProductId(d)),
       );
       let subtotal = 0;
       let taxAmount = 0;
       let lineDiscounts = 0;
 
       for (const detailDto of dto.details) {
-        const product = await this.productService.findOne(detailDto.productId);
-        const unitPrice = customPrices.get(detailDto.productId) ?? Number(detailDto.unitPrice);
+        const productId = this.lineProductId(detailDto);
+        const product = await this.productService.findOne(productId);
+        const unitPrice = this.resolveLineUnitPrice(product, detailDto, customPrices);
         const lineSubtotal = detailDto.quantity * unitPrice;
         let lineDiscount = 0;
         let discountPct = detailDto.discount || 0;
@@ -498,7 +505,7 @@ export class SaleService {
 
         const detail = qr.manager.create(SaleDetail, {
           sale: savedSale,
-          product: { id: detailDto.productId },
+          product: { id: productId },
           quantity: detailDto.quantity,
           unitPrice,
           discount: discountPct,
@@ -518,7 +525,7 @@ export class SaleService {
         if (product.manageStock) {
           await this.inventoryMovementService.create(
             {
-              productId: detailDto.productId,
+              productId,
               branchId: dto.branchId,
               quantity: detailDto.quantity,
               type: MovementType.OUT,
@@ -571,13 +578,15 @@ export class SaleService {
       const total = taxableBase - globalDiscounts + finalTaxAmount;
 
       // 6. Payments
-      let paidAmount = 0;
+      const savedPayments: SalePayment[] = [];
       if (dto.payments?.length) {
         for (const payDto of dto.payments) {
           const payment = qr.manager.create(SalePayment, {
             sale: savedSale,
             paymentMethod: { id: payDto.paymentMethodId },
             amount: payDto.amount,
+            creditedAmount: 0,
+            fromCredit: false,
             date: payDto.date ? new Date(payDto.date) : new Date(),
             referenceNumber: payDto.referenceNumber,
             bankAccount: payDto.bankAccountId ? { id: payDto.bankAccountId } : null,
@@ -586,12 +595,13 @@ export class SaleService {
             isDownPayment: false,
             notes: payDto.notes,
           });
-          await qr.manager.save(payment);
-          paidAmount += Number(payDto.amount);
+          savedPayments.push(await qr.manager.save(payment));
         }
       }
 
-      const pendingAmount = total - paidAmount;
+      const settled = await settleTenderedPayments(qr.manager, savedSale.id, dto.customerId, total, savedPayments, 'change');
+      const paidAmount = settled.paidAmount;
+      const pendingAmount = settled.pendingAmount;
 
       await qr.manager.update(Sale, savedSale.id, {
         subtotal,
@@ -602,17 +612,16 @@ export class SaleService {
         pendingAmount,
       });
 
-      // 7. Post-process
-      if (dto.customerId) {
-        await this.customerService.updatePurchaseStats(dto.customerId, total);
-      }
-
       if (dto.discountCodeId) {
         const discountCode = await this.discountCodeService.findOne(dto.discountCodeId);
         await this.discountCodeService.applyDiscountCode(discountCode.code, savedSale.id);
       }
 
       await qr.commitTransaction();
+
+      if (dto.customerId) {
+        await this.customerService.updatePurchaseStats(dto.customerId, total);
+      }
 
       const finalSale = await this.findOne(savedSale.id);
       this.saleGateway.notifyNewSale(finalSale);
@@ -1247,8 +1256,10 @@ export class SaleService {
         }
 
         const newQtyByProduct = new Map<string, number>();
+        await this.bindGenericLines(dto.details);
         for (const det of dto.details) {
-          newQtyByProduct.set(det.productId, (newQtyByProduct.get(det.productId) || 0) + Number(det.quantity));
+          const productId = this.lineProductId(det);
+          newQtyByProduct.set(productId, (newQtyByProduct.get(productId) || 0) + Number(det.quantity));
         }
 
         if (!sale.isPreorder) {
@@ -1261,6 +1272,7 @@ export class SaleService {
                 'product.id',
                 'product.name',
                 'product.manageStock',
+                'product.isGeneric',
                 'COALESCE(SUM(inventory.stock), 0) AS current_stock',
                 'COALESCE(SUM(inventory.reserved_stock), 0) AS reserved_stock',
                 'COALESCE(bool_and(inventory.is_available), true) AS is_available',
@@ -1285,13 +1297,16 @@ export class SaleService {
             const currentStock = Number(stockQuery.current_stock || 0);
             const reservedStock = Number(stockQuery.reserved_stock || 0);
             const productName = stockQuery.product_name;
+            const isGeneric = stockQuery.product_isGeneric === true || stockQuery.product_isGeneric === 1 || stockQuery.product_is_generic === true || stockQuery.product_is_generic === 1;
+            if (isGeneric) {
+              continue;
+            }
             const manageStock = stockQuery.product_manageStock === true || stockQuery.product_manageStock === 1;
             const isAvailable =
               stockQuery.is_available === true ||
               stockQuery.is_available === 1 ||
               stockQuery.is_available === '1' ||
               stockQuery.is_available === null;
-
             if (manageStock === false) {
               if (!isAvailable) {
                 stockErrors.push(`Producto "${productName}" no está disponible en esta sucursal`);
@@ -1347,7 +1362,7 @@ export class SaleService {
 
         const customPrices = await this.customerProductPriceService.getActivePriceMap(
           dto.customerId || sale.customer?.id,
-          dto.details.map((d) => d.productId),
+          dto.details.map((d) => this.lineProductId(d)),
         );
         let subtotal = 0;
         let taxAmount = 0;
@@ -1355,7 +1370,9 @@ export class SaleService {
         const newDetails: SaleDetail[] = [];
 
         for (const detailDto of dto.details) {
-          const unitPrice = customPrices.get(detailDto.productId) ?? Number(detailDto.unitPrice);
+          const productId = this.lineProductId(detailDto);
+          const product = await this.productService.findOne(productId);
+          const unitPrice = this.resolveLineUnitPrice(product, detailDto, customPrices);
           const lineSubtotal = detailDto.quantity * unitPrice;
           const lineDiscount = (lineSubtotal * (detailDto.discount || 0)) / 100;
           const lineAfterDiscount = lineSubtotal - lineDiscount;
@@ -1363,8 +1380,8 @@ export class SaleService {
           const lineTotal = lineAfterDiscount + lineTax;
 
           const detail = qr.manager.create(SaleDetail, {
-            sale: sale,
-            product: { id: detailDto.productId },
+            sale,
+            product: { id: productId },
             quantity: detailDto.quantity,
             unitPrice,
             discount: detailDto.discount || 0,
@@ -1372,6 +1389,8 @@ export class SaleService {
             taxPercentage: sale.applyTax ? (detailDto.taxPercentage ?? 12) : 0,
             taxAmount: lineTax,
             lineTotal,
+            notes: detailDto.notes,
+            originalPrice: detailDto.originalPrice || Number(product.price),
           });
           newDetails.push(detail);
 
@@ -2032,6 +2051,45 @@ export class SaleService {
     }
 
     this.logger.log(`Recordatorio de cobro enviado ${sale.invoiceNumber} → ${to} (${bodyText})`);
+  }
+
+  private async bindGenericLines(details: { generic?: boolean; productId?: string; notes?: string }[]): Promise<void> {
+    if (!details.some((d) => d.generic || !d.productId)) return;
+    const product = await this.productService.ensureGenericProduct();
+    for (const detail of details) {
+      if (!detail.generic && detail.productId) continue;
+      if (!detail.notes?.trim()) {
+        throw new BadRequestException('Indica la descripción de lo que se está vendiendo');
+      }
+      detail.productId = product.id;
+      detail.generic = true;
+    }
+  }
+
+  private lineProductId(detail: { productId?: string }): string {
+    if (!detail.productId) {
+      throw new BadRequestException('La línea no tiene producto');
+    }
+    return detail.productId;
+  }
+
+  private resolveLineUnitPrice(
+    product: { isGeneric?: boolean },
+    detailDto: { notes?: string; unitPrice: number; productId?: string },
+    customPrices: Map<string, number>,
+  ): number {
+    if (product.isGeneric) {
+      const description = detailDto.notes?.trim();
+      if (!description) {
+        throw new BadRequestException('El producto genérico requiere una descripción de lo que se vendió');
+      }
+      const price = Number(detailDto.unitPrice);
+      if (!(price > 0)) {
+        throw new BadRequestException('El producto genérico requiere un precio mayor a cero');
+      }
+      return price;
+    }
+    return customPrices.get(this.lineProductId(detailDto)) ?? Number(detailDto.unitPrice);
   }
 }
 

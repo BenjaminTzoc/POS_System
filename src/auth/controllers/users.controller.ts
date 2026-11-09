@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
 import { AuthService } from '../auth.service';
-import { CreateUserDto, UpdateUserDto, UserResponseDto } from '../dto';
+import { CreateUserDto, RegisterUserDto, UpdateUserDto, UserResponseDto } from '../dto';
 import { Permissions, Public } from '../decorators';
 import { User as UserDecorator } from 'src/common/decorators/user.decorator';
 import { User } from '../entities';
@@ -15,6 +15,13 @@ export class UsersController {
   @HttpCode(HttpStatus.CREATED)
   createUser(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
     return this.authService.createUser(dto);
+  }
+
+  @Post('register')
+  @Permissions('users.manage')
+  @HttpCode(HttpStatus.CREATED)
+  registerUser(@Body() dto: RegisterUserDto): Promise<UserResponseDto> {
+    return this.authService.registerUser(dto);
   }
 
   @Get()

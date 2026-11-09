@@ -35,6 +35,7 @@ export class TodayPaymentsService {
       .leftJoinAndSelect('payment.bankAccount', 'bankAccount')
       .where('payment.deletedAt IS NULL')
       .andWhere('payment.status = :completed', { completed: PaymentStatus.COMPLETED })
+      .andWhere('payment.fromCredit = false')
       .andWhere('sale.deletedAt IS NULL')
       .andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
       .andWhere('payment.date BETWEEN :start AND :end', { start, end });
@@ -113,7 +114,8 @@ export class TodayPaymentsService {
       });
       let remaining = round2(Number(payment.sale.total) || 0);
       for (const p of ordered) {
-        remaining = round2(Math.max(0, remaining - Number(p.amount || 0)));
+        const applied = Math.max(0, Number(p.amount || 0) - Number(p.creditedAmount || 0));
+        remaining = round2(Math.max(0, remaining - applied));
         if (p.id === payment.id && todayIds.has(p.id)) {
           map.set(p.id, remaining);
           break;

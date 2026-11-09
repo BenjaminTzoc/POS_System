@@ -1,8 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository, EntityManager, DataSource } from 'typeorm';
+import { ILike, In, IsNull, Repository, EntityManager, DataSource } from 'typeorm';
 import { Permission, Role, User } from './entities';
-import { CreatePermissionDto, CreateRoleDto, CreateUserDto, PermissionResponseDto, RoleResponseDto, UpdatePermissionDto, UpdateRoleDto, UpdateUserDto, UserResponseDto } from './dto';
+import { CreatePermissionDto, CreateRoleDto, CreateUserDto, LoginDto, PermissionResponseDto, RegisterUserDto, RoleResponseDto, UpdatePermissionDto, UpdateRoleDto, UpdateUserDto, UserResponseDto } from './dto';
 import { plainToInstance } from 'class-transformer';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
@@ -573,6 +573,60 @@ export class AuthService {
     return plainToInstance(RoleResponseDto, restoredRole);
   }
 
+  async registerUser(dto: RegisterUserDto): Promise<UserResponseDto> {
+    const role = await this.findRoleByNameOrId(dto.role);
+    const branchId = role.isSuperAdmin ? undefined : (await this.findBranchByNameOrId(dto.branch)).id;
+
+    return this.createUser({
+      name: dto.name.trim(),
+      email: dto.email.trim().toLowerCase(),
+      password: dto.password,
+      roleIds: [role.id],
+      branchId,
+    });
+  }
+
+  private async findRoleByNameOrId(value: string): Promise<Role> {
+    const key = value.trim();
+    const role = await this.roleRepository.findOne({
+      where: this.isUuid(key) ? { id: key, deletedAt: IsNull() } : { name: ILike(key), deletedAt: IsNull() },
+      relations: ['permissions'],
+    });
+
+    if (role) return role;
+
+    const roles = await this.roleRepository.find({
+      where: { deletedAt: IsNull() },
+      order: { name: 'ASC' },
+    });
+    const names = roles.map((item) => item.name).join(', ');
+    throw new BadRequestException(`El rol '${value}' no existe. Roles disponibles: ${names}`);
+  }
+
+  private async findBranchByNameOrId(value?: string): Promise<Branch> {
+    const key = value?.trim();
+    if (!key) {
+      throw new BadRequestException('La sucursal es obligatoria para este rol. Indica el nombre de la sucursal.');
+    }
+
+    const branch = await this.branchRepository.findOne({
+      where: this.isUuid(key) ? { id: key, deletedAt: IsNull() } : { name: ILike(key), deletedAt: IsNull() },
+    });
+
+    if (branch) return branch;
+
+    const branches = await this.branchRepository.find({
+      where: { deletedAt: IsNull() },
+      order: { name: 'ASC' },
+    });
+    const names = branches.map((item) => item.name).join(', ') || 'ninguna';
+    throw new BadRequestException(`La sucursal '${value}' no existe. Sucursales disponibles: ${names}`);
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
+
   async createUser(dto: CreateUserDto): Promise<UserResponseDto> {
     const existingUser = await this.userRepository.findOne({
       where: { email: dto.email },
@@ -795,22 +849,34 @@ export class AuthService {
     });
   }
 
+  async issueToken(dto: LoginDto): Promise<{ accessToken: string }> {
+    const user = await this.findUserForLogin(dto.email, dto.password);
+    return this.generateJwt(user);
+  }
+
   async validateUser(email: string, password: string): Promise<{ user?: UserResponseDto; accessToken: string }> {
-    const user = await this.findUserByEmail(email);
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Credenciales inválidas');
-    }
-
-    await this.updateLastLogin(user.id);
-
+    const user = await this.findUserForLogin(email, password);
     const { accessToken } = await this.generateJwt(user);
 
     return {
       user: plainToInstance(UserResponseDto, user),
       accessToken,
     };
+  }
+
+  private async findUserForLogin(email: string, password: string): Promise<User> {
+    const user = await this.userRepository.findOne({
+      where: { email: email.trim().toLowerCase(), deletedAt: IsNull() },
+      relations: ['roles', 'permissions', 'branch'],
+    });
+
+    const isPasswordValid = user ? await bcrypt.compare(password, user.password) : false;
+    if (!user || !isPasswordValid) {
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    await this.updateLastLogin(user.id);
+    return user;
   }
 
   private async generateJwt(user: User): Promise<{ accessToken: string }> {

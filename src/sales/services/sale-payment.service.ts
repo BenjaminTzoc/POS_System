@@ -3,7 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { PaymentMethodService } from 'src/purchases/services';
 import { BankAccountService } from 'src/finances/services/bank-account.service';
 import { Repository, DataSource, IsNull } from 'typeorm';
-import { SalePayment, Sale, SaleStatus, PaymentStatus } from '../entities';
+import { SalePayment, Sale, SaleStatus, PaymentStatus, CustomerCreditMovementType } from '../entities';
+import { money, recordCreditMovement, reverseCreditForPayment, settleTenderedPayments } from './customer-credit.util';
 import { SaleService } from '.';
 import { CreateSalePaymentDto, SalePaymentResponseDto, UpdateSalePaymentDto, SalePaymentReceiptResponseDto, IndividualPaymentReceiptResponseDto, SaleCustomerReceiptDto, SaleBranchReceiptDto, SalePaymentReceiptItemDto } from '../dto';
 import { plainToInstance } from 'class-transformer';
@@ -37,7 +38,10 @@ export class SalePaymentService {
     }
 
 
-    if (paymentMethod.requiresBankAccount && !dto.bankAccountId && !dto.manualBankAccount) {
+    const cashAmount = money(dto.amount);
+    const requestedCredit = money(dto.applyCredit);
+
+    if (cashAmount > 0 && paymentMethod.requiresBankAccount && !dto.bankAccountId && !dto.manualBankAccount) {
       throw new BadRequestException('Este método de pago requiere una cuenta bancaria (catálogo) o manual');
     }
 
@@ -64,8 +68,31 @@ export class SalePaymentService {
       throw new BadRequestException('No se pueden agregar pagos a una venta cancelada');
     }
 
-    if (dto.amount > sale.pendingAmount) {
-      throw new BadRequestException(`El monto excede el saldo pendiente de Q${sale.pendingAmount}`);
+    const pending = money(sale.pendingAmount);
+    const customerId = sale.customer?.id ?? null;
+
+    if (cashAmount <= 0 && requestedCredit <= 0) {
+      throw new BadRequestException('Indique un monto o un saldo a favor para aplicar');
+    }
+
+    if (!customerId && requestedCredit > 0) {
+      throw new BadRequestException('El saldo a favor solo aplica a un cliente registrado');
+    }
+
+    if (!customerId && cashAmount > pending + 0.009) {
+      throw new BadRequestException(`El monto excede el saldo pendiente de Q${pending.toFixed(2)}`);
+    }
+
+    if (requestedCredit > 0 && cashAmount > pending + 0.009) {
+      throw new BadRequestException('No se puede pagar de más y usar saldo a favor en el mismo abono');
+    }
+
+    const appliedCash = Math.min(cashAmount, pending);
+    const excess = money(cashAmount - appliedCash);
+    const remaining = money(pending - appliedCash);
+
+    if (requestedCredit > remaining + 0.009) {
+      throw new BadRequestException(`El saldo a favor no puede superar lo pendiente de Q${remaining.toFixed(2)}`);
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -73,23 +100,66 @@ export class SalePaymentService {
     await queryRunner.startTransaction();
 
     try {
-      const payment = queryRunner.manager.create(SalePayment, {
-        sale: { id: dto.saleId },
-        paymentMethod: { id: dto.paymentMethodId },
-        amount: Number(dto.amount),
-        date: new Date(dto.date),
-        referenceNumber: dto.referenceNumber,
-        bankAccount: dto.bankAccountId ? { id: dto.bankAccountId } : null,
-        manualBankAccount: dto.manualBankAccount,
-        status: dto.status || PaymentStatus.COMPLETED,
-        isDownPayment: !!dto.isDownPayment || !!sale.isPreorder,
-        notes: dto.notes,
-      });
+      let receiptPaymentId: string | null = null;
 
-      const savedPayment = await queryRunner.manager.save(payment);
+      if (cashAmount > 0) {
+        const excessNote = excess > 0 ? `Excedente Q${excess.toFixed(2)} a favor del cliente.` : '';
+        const payment = queryRunner.manager.create(SalePayment, {
+          sale: { id: dto.saleId },
+          paymentMethod: { id: dto.paymentMethodId },
+          amount: cashAmount,
+          creditedAmount: excess,
+          fromCredit: false,
+          date: new Date(dto.date),
+          referenceNumber: dto.referenceNumber,
+          bankAccount: dto.bankAccountId ? { id: dto.bankAccountId } : null,
+          manualBankAccount: dto.manualBankAccount,
+          status: dto.status || PaymentStatus.COMPLETED,
+          isDownPayment: !!dto.isDownPayment || !!sale.isPreorder,
+          notes: [dto.notes, excessNote].filter(Boolean).join(' ') || null,
+        });
+        const savedPayment = await queryRunner.manager.save(payment);
+        receiptPaymentId = savedPayment.id;
 
-      const newPaidAmount = Number(sale.paidAmount) + Number(dto.amount);
-      const newPendingAmount = Number(sale.total) - Number(newPaidAmount);
+        if (excess > 0 && customerId) {
+          await recordCreditMovement(queryRunner.manager, {
+            customerId,
+            saleId: sale.id,
+            paymentId: savedPayment.id,
+            amount: excess,
+            type: CustomerCreditMovementType.OVERPAYMENT,
+          });
+        }
+      }
+
+      if (requestedCredit > 0 && customerId) {
+        const creditPayment = queryRunner.manager.create(SalePayment, {
+          sale: { id: dto.saleId },
+          paymentMethod: { id: dto.paymentMethodId },
+          amount: requestedCredit,
+          creditedAmount: 0,
+          fromCredit: true,
+          date: new Date(dto.date),
+          referenceNumber: dto.referenceNumber,
+          status: dto.status || PaymentStatus.COMPLETED,
+          isDownPayment: !!dto.isDownPayment || !!sale.isPreorder,
+          notes: [dto.notes, 'Aplicado de saldo a favor.'].filter(Boolean).join(' '),
+        });
+        const savedCreditPayment = await queryRunner.manager.save(creditPayment);
+        receiptPaymentId = receiptPaymentId ?? savedCreditPayment.id;
+
+        await recordCreditMovement(queryRunner.manager, {
+          customerId,
+          saleId: sale.id,
+          paymentId: savedCreditPayment.id,
+          amount: requestedCredit,
+          type: CustomerCreditMovementType.APPLIED,
+        });
+      }
+
+      const appliedToSale = money(appliedCash + requestedCredit);
+      const newPaidAmount = money(money(sale.paidAmount) + appliedToSale);
+      const newPendingAmount = money(Math.max(0, money(sale.total) - newPaidAmount));
 
       await queryRunner.manager.update(Sale, sale.id, {
         paidAmount: newPaidAmount,
@@ -97,7 +167,7 @@ export class SalePaymentService {
       });
 
       await queryRunner.commitTransaction();
-      return this.findOne(savedPayment.id);
+      return this.findOne(receiptPaymentId!);
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -184,6 +254,10 @@ export class SalePaymentService {
       throw new BadRequestException('No se puede modificar un pago cancelado');
     }
 
+    if ((money(payment.creditedAmount) > 0 || payment.fromCredit) && dto.amount !== undefined && money(dto.amount) !== money(payment.amount)) {
+      throw new BadRequestException('No se puede cambiar el monto de un abono ligado a saldo a favor');
+    }
+
     const oldAmount = payment.amount;
     const sale = payment.sale;
 
@@ -251,11 +325,14 @@ export class SalePaymentService {
     await queryRunner.startTransaction();
 
     try {
+      await reverseCreditForPayment(queryRunner.manager, payment.id);
+
       payment.status = PaymentStatus.CANCELLED;
       await queryRunner.manager.save(payment);
 
-      const newPaidAmount = sale.paidAmount - payment.amount;
-      const newPendingAmount = sale.total - newPaidAmount;
+      const appliedToSale = money(money(payment.amount) - money(payment.creditedAmount));
+      const newPaidAmount = money(money(sale.paidAmount) - appliedToSale);
+      const newPendingAmount = money(money(sale.total) - newPaidAmount);
 
       await queryRunner.manager.update(Sale, sale.id, {
         paidAmount: newPaidAmount,
@@ -378,23 +455,20 @@ export class SalePaymentService {
       throw new BadRequestException('No se pueden agregar pagos a una venta cancelada');
     }
 
-    const totalPaymentAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
-
-    if (totalPaymentAmount > sale.pendingAmount) {
-      throw new BadRequestException(`El monto total de pagos excede el saldo pendiente de Q${sale.pendingAmount}`);
-    }
-
     const createdPayments: SalePaymentResponseDto[] = [];
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
+      const savedPayments: SalePayment[] = [];
       for (const paymentData of payments) {
         const payment = queryRunner.manager.create(SalePayment, {
           sale: { id: saleId },
           paymentMethod: { id: paymentData.paymentMethodId },
           amount: paymentData.amount,
+          creditedAmount: 0,
+          fromCredit: false,
           date: new Date(),
           referenceNumber: paymentData.referenceNumber,
           bankAccount: paymentData.bankAccountId ? { id: paymentData.bankAccountId } : null,
@@ -404,11 +478,20 @@ export class SalePaymentService {
         });
 
         const savedPayment = await queryRunner.manager.save(payment);
+        savedPayments.push(savedPayment);
         createdPayments.push(plainToInstance(SalePaymentResponseDto, savedPayment));
       }
 
-      const newPaidAmount = sale.paidAmount + totalPaymentAmount;
-      const newPendingAmount = sale.total - newPaidAmount;
+      const settled = await settleTenderedPayments(
+        queryRunner.manager,
+        saleId,
+        sale.customer?.id,
+        money(sale.pendingAmount),
+        savedPayments,
+        'reject',
+      );
+      const newPaidAmount = money(money(sale.paidAmount) + settled.paidAmount);
+      const newPendingAmount = money(Math.max(0, money(sale.total) - newPaidAmount));
 
       await queryRunner.manager.update(Sale, saleId, {
         paidAmount: newPaidAmount,
@@ -452,13 +535,14 @@ export class SalePaymentService {
 
     const paymentItems: SalePaymentReceiptItemDto[] = payments.map((payment) => {
       const amount = Number(payment.amount);
+      const appliedToSale = Math.max(0, amount - Number(payment.creditedAmount || 0));
       const previousBalance = runningBalance;
 
       let remainingBalance = previousBalance;
       if (payment.status === PaymentStatus.COMPLETED) {
-        runningBalance = Math.max(0, runningBalance - amount);
+        runningBalance = Math.max(0, runningBalance - appliedToSale);
         remainingBalance = runningBalance;
-        totalPaid += amount;
+        totalPaid += appliedToSale;
       }
 
       return {

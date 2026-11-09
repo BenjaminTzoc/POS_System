@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Branch, Inventory, Product } from '../entities';
+import { Branch, Inventory, InventoryMovement, Product } from '../entities';
+import { MovementConcept, MovementStatus, MovementType } from '../entities/inventory-movement.entity';
 import { SaleStatus } from 'src/sales/entities';
 import { IsNull, Repository } from 'typeorm';
 import { CategoryService } from './category.service';
@@ -24,6 +25,35 @@ export class ProductService {
     private readonly unitService: UnitService,
     private readonly fileService: FilesService
   ) {}
+
+  async ensureGenericProduct(): Promise<Product> {
+    const existing = await this.productRepository.findOne({
+      where: { isGeneric: true, deletedAt: IsNull() },
+      order: { createdAt: 'ASC' },
+    });
+    if (existing) {
+      if (existing.manageStock) {
+        existing.manageStock = false;
+        await this.productRepository.save(existing);
+      }
+      return existing;
+    }
+
+    const created = this.productRepository.create({
+      name: 'Producto genérico',
+      description: 'Línea libre de venta. La descripción y el precio se capturan en cada orden.',
+      sku: 'GENERICO',
+      cost: 0,
+      price: 0,
+      manageStock: false,
+      isGeneric: true,
+      isActive: true,
+      isVisible: false,
+      type: ProductType.FINISHED_PRODUCT,
+      stockAvailability: StockAvailability.IN_STOCK,
+    });
+    return this.productRepository.save(created);
+  }
 
   async suggestSku(name?: string, categoryId?: string, type?: ProductType): Promise<{ sku: string }> {
     let prefix = 'PROD';
@@ -124,9 +154,11 @@ export class ProductService {
       unit: unit ? { id: unit.id } : null,
       parent: dto.parentId ? ({ id: dto.parentId } as any) : null,
       stockAvailability: dto.stockAvailability || StockAvailability.IN_STOCK,
-      manageStock: dto.manageStock !== undefined ? dto.manageStock : true,
       isActive: dto.isActive !== undefined ? dto.isActive : true,
-      isVisible: dto.isVisible !== undefined ? dto.isVisible : true,
+      isGeneric: dto.isGeneric === true || (dto.isGeneric as unknown) === 'true',
+      manageStock: (dto.isGeneric === true || (dto.isGeneric as unknown) === 'true')
+        ? false
+        : (dto.manageStock !== undefined ? dto.manageStock : true),
     } as any);
 
     const savedProduct = await this.productRepository.save(product);
@@ -171,9 +203,10 @@ export class ProductService {
         }
       }
 
-      const manageStock = dto.manageStock === 'true' || dto.manageStock === true;
       const isActive = dto.isActive === 'true' || dto.isActive === true;
-      const isVisible = dto.isVisible === 'true' || dto.isVisible === true;
+      const isGeneric = dto.isGeneric === 'true' || dto.isGeneric === true;
+      const manageStock = isGeneric ? false : (dto.manageStock === 'true' || dto.manageStock === true);
+      const isVisible = dto.isVisible === 'true' || dto.isVisible === true || dto.isVisible === undefined;
       const isVariant = dto.isVariant === 'true' || dto.isVariant === true;
       const isMaster = dto.isMaster === 'true' || dto.isMaster === true;
 
@@ -191,6 +224,7 @@ export class ProductService {
         manageStock: manageStock,
         stockAvailability: dto.stockAvailability || StockAvailability.IN_STOCK,
         isActive: isActive,
+        isGeneric,
         isVisible: isVisible,
         type: dto.type,
         isVariant: isVariant,
@@ -269,7 +303,8 @@ export class ProductService {
           'unit.abbreviation',
           'unit.allowsDecimals',
         ])
-        .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
+        .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL')
+        .andWhere('product.isGeneric = false');
 
       if (includeDeleted) {
         minimalQuery.withDeleted();
@@ -359,7 +394,8 @@ export class ProductService {
       .leftJoinAndSelect('variants.inventories', 'vInventories', branchId ? 'vInventories.branch_id = :branchId' : '1=1', { branchId })
       .leftJoinAndSelect('vInventories.branch', 'vBranch')
       .leftJoinAndSelect('variants.unit', 'vUnit')
-      .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL');
+      .where(includeDeleted ? '1=1' : 'product.deletedAt IS NULL')
+      .andWhere('product.isGeneric = false');
 
     if (includeDeleted) {
       query.withDeleted();
@@ -652,6 +688,11 @@ export class ProductService {
       }
     }
 
+    const previousManageStock = Boolean(product.manageStock);
+    const isGeneric = dto.isGeneric === undefined
+      ? Boolean(product.isGeneric)
+      : dto.isGeneric === true || (dto.isGeneric as unknown) === 'true';
+
     Object.assign(product, {
       name: dto.name ?? product.name,
       description: dto.description ?? product.description,
@@ -662,7 +703,12 @@ export class ProductService {
       imageUrl: imageUrl,
       category: category,
       unit: unit,
-      manageStock: (dto.manageStock ?? product.manageStock) as boolean,
+      isGeneric,
+      manageStock: isGeneric
+        ? false
+        : dto.manageStock === undefined
+          ? product.manageStock
+          : dto.manageStock === true || (dto.manageStock as unknown) === 'true',
       stockAvailability: dto.stockAvailability ?? product.stockAvailability,
       isActive: (dto.isActive ?? product.isActive) as boolean,
       isVisible: (dto.isVisible ?? product.isVisible) as boolean,
@@ -672,8 +718,49 @@ export class ProductService {
       parent: dto.parentId !== undefined ? (dto.parentId && dto.parentId !== 'null' ? ({ id: dto.parentId } as any) : null) : product.parent,
     });
 
-    const updatedProduct = await this.productRepository.save(product);
+    const manageStockChanged = Boolean(product.manageStock) !== previousManageStock;
+
+    const updatedProduct = await this.productRepository.manager.transaction(async (manager) => {
+      if (manageStockChanged) {
+        await this.clearStockWithAdjustment(id, manager);
+      }
+      return manager.save(product);
+    });
     return plainToInstance(ProductResponseDto, updatedProduct);
+  }
+
+  private async clearStockWithAdjustment(productId: string, manager: { getRepository: Function }): Promise<void> {
+    const inventories = await manager.getRepository(Inventory).find({
+      where: { product: { id: productId }, deletedAt: IsNull() },
+      relations: ['branch'],
+    });
+
+    for (const inventory of inventories) {
+      const previousStock = Number(inventory.stock) || 0;
+      if (previousStock === 0) continue;
+
+      const movement = manager.getRepository(InventoryMovement).create({
+        product: { id: productId },
+        branch: { id: inventory.branch.id },
+        inventory: { id: inventory.id },
+        quantity: previousStock,
+        type: MovementType.ADJUSTMENT,
+        concept: MovementConcept.ADJUSTMENT,
+        status: MovementStatus.COMPLETED,
+        notes: 'Ajuste por cambio de gestión de stock. Existencia dejada en 0.',
+        movementDate: new Date(),
+        completedAt: new Date(),
+        previousStock,
+        newStock: 0,
+        unitCost: 0,
+        totalCost: 0,
+      });
+      await manager.getRepository(InventoryMovement).save(movement);
+      await manager.getRepository(Inventory).update(inventory.id, {
+        stock: 0,
+        lastMovementDate: new Date(),
+      });
+    }
   }
 
   async remove(id: string): Promise<{ message: string }> {
@@ -913,7 +1000,8 @@ export class ProductService {
       .leftJoinAndSelect('variants.unit', 'vUnit')
       .leftJoinAndSelect('variants.inventories', 'vInventories', 'vInventories.branch_id = :branchId', { branchId })
       .where('product.deletedAt IS NULL')
-      .andWhere('product.isActive = :isActive', { isActive: true });
+      .andWhere('product.isActive = :isActive', { isActive: true })
+      .andWhere('product.isGeneric = false');
 
     if (isMaster === false) {
       query.andWhere('product.isMaster = :isMaster', { isMaster: false });
@@ -940,11 +1028,12 @@ export class ProductService {
       dto.imageUrl = p.imageUrl ?? null;
       dto.price = Number(p.price);
       dto.manageStock = p.manageStock;
+      dto.isGeneric = Boolean(p.isGeneric);
       const inv = p.inventories?.[0];
       dto.stock = p.inventories?.reduce((sum, i) => sum + Number(i.stock), 0) || 0;
       dto.reservedStock = p.inventories?.reduce((sum, i) => sum + Number(i.reservedStock || 0), 0) || 0;
       dto.availableStock = Math.max(0, dto.stock - dto.reservedStock);
-      dto.isAvailable = p.manageStock ? dto.availableStock > 0 : (inv?.isAvailable ?? true);
+      dto.isAvailable = p.isGeneric ? true : (p.manageStock ? dto.availableStock > 0 : (inv?.isAvailable ?? true));
       dto.unitName = p.unit?.name || null;
       dto.unitAbbreviation = p.unit?.abbreviation || null;
       dto.allowsDecimals = p.unit?.allowsDecimals || false;
@@ -1000,10 +1089,12 @@ export class ProductService {
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.unit', 'unit')
       .leftJoinAndSelect('product.parent', 'parent')
-      .innerJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId })
+      .leftJoin('inventories', 'inventory', 'inventory.product_id = product.id AND inventory.branch_id = :branchId', { branchId })
       .where('product.deletedAt IS NULL')
       .andWhere('product.isActive = :isActive', { isActive: true })
       .andWhere('product.isMaster = :isMaster', { isMaster: false })
+      .andWhere('product.isGeneric = false')
+      .andWhere('inventory.id IS NOT NULL')
       .select([
         'product.id',
         'product.name',
@@ -1011,8 +1102,7 @@ export class ProductService {
         'product.imageUrl',
         'product.price',
         'product.manageStock',
-        'inventory.isAvailable',
-        'unit.name',
+        'product.isGeneric',
         'unit.abbreviation',
         'unit.allowsDecimals',
         'parent.name'
@@ -1037,12 +1127,13 @@ export class ProductService {
       dto.imageUrl = p.product_imageUrl ?? null;
       dto.price = Number(p.product_price);
       const manageStock = p.product_manageStock === true || p.product_manageStock === 1;
-      dto.manageStock = manageStock;
       dto.stock = Number(p.stock);
-      const isAvail = p.inventory_is_available ?? p.inventory_isAvailable ?? true;
-      dto.isAvailable = manageStock ? dto.stock > 0 : (isAvail === true || isAvail === 1 || isAvail === '1');
+      const isGeneric = p.product_isGeneric === true || p.product_isGeneric === 1 || p.product_is_generic === true || p.product_is_generic === 1;
+      dto.manageStock = isGeneric ? false : manageStock;
+      dto.isGeneric = isGeneric;
       dto.unitName = p.unit_name;
-      dto.unitAbbreviation = p.unit_abbreviation;
+      const isAvail = p.inventory_is_available ?? p.inventory_isAvailable ?? true;
+      dto.isAvailable = isGeneric ? true : (manageStock ? dto.stock > 0 : (isAvail === true || isAvail === 1 || isAvail === '1'));
       const allowsDec = p.unit_allowsDecimals ?? p.unit_allows_decimals;
       dto.allowsDecimals = allowsDec === 1 || allowsDec === true || allowsDec === '1';
       return dto;

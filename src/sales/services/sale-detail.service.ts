@@ -32,14 +32,25 @@ export class SaleDetailService {
       throw new BadRequestException('Solo se pueden agregar detalles a ventas pendientes');
     }
 
+    let productId = detailDto.productId;
+    if (detailDto.generic || !productId) {
+      if (!detailDto.notes?.trim()) {
+        throw new BadRequestException('Indica la descripción de lo que se está vendiendo');
+      }
+      const generic = await this.productService.ensureGenericProduct();
+      productId = generic.id;
+      detailDto.productId = productId;
+    }
     let product;
     try {
-      product = await this.productService.findOne(detailDto.productId);
+      product = await this.productService.findOne(productId);
     } catch (error) {
-      throw new BadRequestException(`El producto con ID ${detailDto.productId} no existe`);
+      throw new BadRequestException(`El producto con ID ${productId} no existe`);
     }
 
-    const customPrice = await this.customerProductPriceService.getActivePrice(sale.customer?.id, detailDto.productId);
+    const customPrice = product.isGeneric
+      ? null
+      : await this.customerProductPriceService.getActivePrice(sale.customer?.id, productId);
     const unitPrice = customPrice ?? Number(detailDto.unitPrice);
     const lineSubtotal = detailDto.quantity * unitPrice;
     const lineDiscount = detailDto.discountAmount || (lineSubtotal * (detailDto.discount || 0)) / 100;
@@ -48,7 +59,7 @@ export class SaleDetailService {
 
     const detail = this.saleDetailRepository.create({
       sale: { id: saleId },
-      product: { id: detailDto.productId },
+      product: { id: productId },
       quantity: detailDto.quantity,
       unitPrice,
       discount: detailDto.discount || 0,

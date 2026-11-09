@@ -147,6 +147,9 @@ export class CustomerResponseDto extends BaseEntity {
   creditLimit: number;
 
   @Expose()
+  creditBalance: number;
+
+  @Expose()
   @Type(() => CustomerCategoryResponseDto)
   category: CustomerCategoryResponseDto | null;
 

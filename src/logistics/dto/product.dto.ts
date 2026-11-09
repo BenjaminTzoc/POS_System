@@ -77,6 +77,11 @@ export class CreateProductDto {
   manageStock?: boolean | string;
 
   @IsOptional()
+  @IsBoolean()
+  @TransformBoolean()
+  isGeneric?: boolean | string;
+
+  @IsOptional()
   @IsEnum(StockAvailability)
   stockAvailability?: StockAvailability;
 
@@ -206,6 +211,9 @@ export class BranchProductResponseDto {
   manageStock?: boolean;
 
   @Expose()
+  isGeneric?: boolean;
+
+  @Expose()
   isAvailable?: boolean;
 
   @Expose()
@@ -269,6 +277,9 @@ export class ProductResponseDto extends BaseEntity {
 
   @Expose()
   manageStock: boolean;
+
+  @Expose()
+  isGeneric: boolean;
 
   @Expose()
   stockAvailability: StockAvailability;

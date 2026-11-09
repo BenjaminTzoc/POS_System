@@ -35,6 +35,44 @@ export class CreateUserDto {
   permissionIds?: string[];
 }
 
+export class LoginDto {
+  @IsNotEmpty()
+  @IsEmail()
+  @MaxLength(150)
+  email: string;
+
+  @IsNotEmpty()
+  @IsString()
+  password: string;
+}
+
+export class RegisterUserDto {
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(100)
+  name: string;
+
+  @IsNotEmpty()
+  @IsEmail()
+  @MaxLength(150)
+  email: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(6)
+  password: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(50)
+  role: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  branch?: string;
+}
+
 export class UpdateUserDto extends PartialType(CreateUserDto) {
   @IsOptional()
   @IsBoolean()

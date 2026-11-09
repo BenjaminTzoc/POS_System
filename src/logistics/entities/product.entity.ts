@@ -83,6 +83,10 @@ export class Product extends BaseEntity {
   @Column({ type: 'boolean', default: false })
   isMaster: boolean;
 
+  /** Línea libre en la venta: descripción y precio los captura el cajero. No mueve inventario. */
+  @Column({ name: 'is_generic', type: 'boolean', default: false })
+  isGeneric: boolean;
+
   @ManyToOne(() => Product, (product) => product.variants, { nullable: true })
   @JoinColumn({ name: 'parent_id' })
   parent?: Product;

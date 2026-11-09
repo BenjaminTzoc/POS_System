@@ -32,6 +32,12 @@ export class SalePayment extends BaseEntity {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
 
+  @Column({ name: 'credited_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  creditedAmount: number;
+
+  @Column({ name: 'from_credit', type: 'boolean', default: false })
+  fromCredit: boolean;
+
   @Column({ type: 'timestamp' })
   date: Date;
 

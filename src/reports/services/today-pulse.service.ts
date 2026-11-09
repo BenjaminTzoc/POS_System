@@ -144,6 +144,7 @@ export class TodayPulseService {
       )
       .where('payment.deletedAt IS NULL')
       .andWhere('payment.status = :completed', { completed: PaymentStatus.COMPLETED })
+      .andWhere('payment.fromCredit = false')
       .andWhere('sale.deletedAt IS NULL')
       .andWhere('sale.status != :cancelled', { cancelled: SaleStatus.CANCELLED })
       .andWhere('payment.date BETWEEN :start AND :end', { start, end })

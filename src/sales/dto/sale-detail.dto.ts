@@ -1,13 +1,18 @@
-import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, Max, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsUUID, IsNumber, Min, Max, IsEnum, IsBoolean, ValidateIf } from 'class-validator';
 import { Type, Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { ProductResponseDto, AreaResponseDto } from 'src/logistics/dto';
 import { DiscountType } from '../entities';
 
 export class CreateSaleDetailDto {
+  @IsOptional()
+  @IsBoolean()
+  generic?: boolean;
+
+  @ValidateIf((o) => !o.generic)
   @IsNotEmpty()
   @IsUUID()
-  productId: string;
+  productId?: string;
 
   @IsNotEmpty()
   @IsNumber()

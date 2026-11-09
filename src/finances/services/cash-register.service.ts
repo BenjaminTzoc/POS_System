@@ -74,6 +74,7 @@ export class CashRegisterService {
         date: Between(session.openedAt, new Date()),
         paymentMethod: { id: cashMethod.id },
         status: PaymentStatus.COMPLETED,
+        fromCredit: false,
         sale: { branch: { id: session.branch.id } },
       },
       relations: ['sale', 'sale.branch'],
